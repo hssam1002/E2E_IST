@@ -1,0 +1,629 @@
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+2025-12-06 01:17:17,156 - INFO] Initializing E2E-IST...
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+2025-12-06 01:17:17,428 - INFO] Network config: 
+2025-12-06 01:17:17,428 - INFO] Encoder: {'embed_dims': [128, 192, 256, 320], 'depths': [2, 2, 6, 2], 'num_heads': [4, 6, 8, 10], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+2025-12-06 01:17:17,428 - INFO] Decoder: {'embed_dims': [320, 256, 192, 128], 'depths': [2, 6, 2, 2], 'num_heads': [10, 8, 6, 4], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.
+Encoder  dim=3, input_resolution=(256, 256), depth=2
+Encoder  dim=128, input_resolution=(128, 128), depth=2
+Encoder  dim=192, input_resolution=(64, 64), depth=6
+Encoder  dim=256, input_resolution=(32, 32), depth=2
+Decoder  dim=320, input_resolution=(16, 16), depth=2
+Decoder  dim=256, input_resolution=(32, 32), depth=6
+Decoder  dim=192, input_resolution=(64, 64), depth=2
+Decoder  dim=128, input_resolution=(128, 128), depth=2
+Using 4 GPUs!
+[*] DIV2K Train dataset found at /data4/hongsik/data/DIV2K/DIV2K_train_HR
+[*] Kodak dataset found at /data4/hongsik/data/Kodak
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:71: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn(
+2025-12-06 01:17:33,517 - INFO] Epoch 0 [23] | Loss 0.0340 | SNR 10
+2025-12-06 01:17:33,523 - INFO] Start Epoch 0 | Mode: all | Alpha: base
+2025-12-06 01:17:49,085 - INFO] Start Epoch 1 | Mode: all | Alpha: base
+2025-12-06 01:18:04,771 - INFO] Start Epoch 2 | Mode: all | Alpha: base
+2025-12-06 01:18:20,648 - INFO] Start Epoch 3 | Mode: all | Alpha: base
+2025-12-06 01:18:36,337 - INFO] Start Epoch 4 | Mode: all | Alpha: base
+2025-12-06 01:18:36,341 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:18:40,663 - INFO] Testset: Kodak | 10 | PSNR: 19.68 dB | MS-SSIM: 0.3240
+2025-12-06 01:18:40,779 - INFO] Best Model Saved! PSNR: 19.6846
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+2025-12-06 01:19:13,424 - INFO] Initializing E2E-IST...
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+2025-12-06 01:19:13,735 - INFO] Network config: 
+2025-12-06 01:19:13,735 - INFO] Encoder: {'embed_dims': [128, 192, 256, 320], 'depths': [2, 2, 6, 2], 'num_heads': [4, 6, 8, 10], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+2025-12-06 01:19:13,735 - INFO] Decoder: {'embed_dims': [320, 256, 192, 128], 'depths': [2, 6, 2, 2], 'num_heads': [10, 8, 6, 4], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.
+Encoder  dim=3, input_resolution=(256, 256), depth=2
+Encoder  dim=128, input_resolution=(128, 128), depth=2
+Encoder  dim=192, input_resolution=(64, 64), depth=6
+Encoder  dim=256, input_resolution=(32, 32), depth=2
+Decoder  dim=320, input_resolution=(16, 16), depth=2
+Decoder  dim=256, input_resolution=(32, 32), depth=6
+Decoder  dim=192, input_resolution=(64, 64), depth=2
+Decoder  dim=128, input_resolution=(128, 128), depth=2
+Using 4 GPUs!
+[*] DIV2K Train dataset found at /data4/hongsik/data/DIV2K/DIV2K_train_HR
+[*] Kodak dataset found at /data4/hongsik/data/Kodak
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:71: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn(
+2025-12-06 01:19:30,092 - INFO] Epoch 0 [23] | Loss 0.0340 | SNR 10
+2025-12-06 01:19:30,100 - INFO] Start Epoch 0 | Mode: all | Alpha: base
+2025-12-06 01:19:45,888 - INFO] Start Epoch 1 | Mode: all | Alpha: base
+2025-12-06 01:20:01,957 - INFO] Start Epoch 2 | Mode: all | Alpha: base
+2025-12-06 01:20:18,561 - INFO] Start Epoch 3 | Mode: all | Alpha: base
+2025-12-06 01:20:34,934 - INFO] Start Epoch 4 | Mode: all | Alpha: base
+2025-12-06 01:20:34,938 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:20:39,242 - INFO] Testset: Kodak | 10 | PSNR: 19.68 dB | MS-SSIM: 0.3240
+2025-12-06 01:20:39,358 - INFO] Best Model Saved! PSNR: 19.6846
+2025-12-06 01:20:55,478 - INFO] Start Epoch 5 | Mode: all | Alpha: base
+2025-12-06 01:21:12,143 - INFO] Start Epoch 6 | Mode: all | Alpha: base
+2025-12-06 01:21:28,108 - INFO] Start Epoch 7 | Mode: all | Alpha: base
+2025-12-06 01:21:44,937 - INFO] Start Epoch 8 | Mode: all | Alpha: base
+2025-12-06 01:22:02,729 - INFO] Start Epoch 9 | Mode: all | Alpha: base
+2025-12-06 01:22:02,733 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:22:06,860 - INFO] Testset: Kodak | 10 | PSNR: 21.14 dB | MS-SSIM: 0.2563
+2025-12-06 01:22:07,290 - INFO] Best Model Saved! PSNR: 21.1383
+2025-12-06 01:22:24,338 - INFO] Start Epoch 10 | Mode: all | Alpha: base
+2025-12-06 01:22:40,730 - INFO] Start Epoch 11 | Mode: all | Alpha: base
+2025-12-06 01:22:57,466 - INFO] Start Epoch 12 | Mode: all | Alpha: base
+2025-12-06 01:23:15,172 - INFO] Start Epoch 13 | Mode: all | Alpha: base
+2025-12-06 01:23:31,923 - INFO] Start Epoch 14 | Mode: all | Alpha: base
+2025-12-06 01:23:31,927 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:23:36,068 - INFO] Testset: Kodak | 10 | PSNR: 22.48 dB | MS-SSIM: 0.1820
+2025-12-06 01:23:36,524 - INFO] Best Model Saved! PSNR: 22.4756
+2025-12-06 01:23:52,909 - INFO] Start Epoch 15 | Mode: all | Alpha: base
+2025-12-06 01:24:08,791 - INFO] Start Epoch 16 | Mode: all | Alpha: base
+2025-12-06 01:24:26,721 - INFO] Start Epoch 17 | Mode: all | Alpha: base
+2025-12-06 01:24:43,750 - INFO] Start Epoch 18 | Mode: all | Alpha: base
+2025-12-06 01:25:00,049 - INFO] Start Epoch 19 | Mode: all | Alpha: base
+2025-12-06 01:25:00,053 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:25:04,243 - INFO] Testset: Kodak | 10 | PSNR: 23.73 dB | MS-SSIM: 0.1580
+2025-12-06 01:25:04,697 - INFO] Best Model Saved! PSNR: 23.7305
+2025-12-06 01:25:21,399 - INFO] Start Epoch 20 | Mode: all | Alpha: base
+2025-12-06 01:25:38,957 - INFO] Start Epoch 21 | Mode: all | Alpha: base
+2025-12-06 01:25:55,813 - INFO] Start Epoch 22 | Mode: all | Alpha: base
+2025-12-06 01:26:12,929 - INFO] Start Epoch 23 | Mode: all | Alpha: base
+2025-12-06 01:26:29,725 - INFO] Start Epoch 24 | Mode: all | Alpha: base
+2025-12-06 01:26:29,729 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:26:33,822 - INFO] Testset: Kodak | 10 | PSNR: 24.06 dB | MS-SSIM: 0.1356
+2025-12-06 01:26:34,264 - INFO] Best Model Saved! PSNR: 24.0622
+2025-12-06 01:26:52,208 - INFO] Start Epoch 25 | Mode: all | Alpha: base
+2025-12-06 01:27:08,581 - INFO] Start Epoch 26 | Mode: all | Alpha: base
+2025-12-06 01:27:26,229 - INFO] Start Epoch 27 | Mode: all | Alpha: base
+2025-12-06 01:27:42,644 - INFO] Start Epoch 28 | Mode: all | Alpha: base
+2025-12-06 01:28:00,079 - INFO] Start Epoch 29 | Mode: all | Alpha: base
+2025-12-06 01:28:00,083 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:28:04,169 - INFO] Testset: Kodak | 10 | PSNR: 23.92 dB | MS-SSIM: 0.1288
+2025-12-06 01:28:22,532 - INFO] Start Epoch 30 | Mode: all | Alpha: base
+2025-12-06 01:28:40,384 - INFO] Start Epoch 31 | Mode: all | Alpha: base
+2025-12-06 01:28:56,613 - INFO] Start Epoch 32 | Mode: all | Alpha: base
+2025-12-06 01:29:13,036 - INFO] Start Epoch 33 | Mode: all | Alpha: base
+2025-12-06 01:29:29,402 - INFO] Start Epoch 34 | Mode: all | Alpha: base
+2025-12-06 01:29:29,404 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:29:33,602 - INFO] Testset: Kodak | 10 | PSNR: 24.64 dB | MS-SSIM: 0.1115
+2025-12-06 01:29:34,031 - INFO] Best Model Saved! PSNR: 24.6406
+2025-12-06 01:29:50,184 - INFO] Start Epoch 35 | Mode: all | Alpha: base
+2025-12-06 01:30:07,803 - INFO] Start Epoch 36 | Mode: all | Alpha: base
+2025-12-06 01:30:25,700 - INFO] Start Epoch 37 | Mode: all | Alpha: base
+2025-12-06 01:30:42,246 - INFO] Start Epoch 38 | Mode: all | Alpha: base
+2025-12-06 01:30:59,881 - INFO] Start Epoch 39 | Mode: all | Alpha: base
+2025-12-06 01:30:59,885 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:31:04,119 - INFO] Testset: Kodak | 10 | PSNR: 24.99 dB | MS-SSIM: 0.1018
+2025-12-06 01:31:04,559 - INFO] Best Model Saved! PSNR: 24.9898
+2025-12-06 01:31:21,281 - INFO] Start Epoch 40 | Mode: all | Alpha: base
+2025-12-06 01:31:39,627 - INFO] Start Epoch 41 | Mode: all | Alpha: base
+2025-12-06 01:31:55,958 - INFO] Start Epoch 42 | Mode: all | Alpha: base
+2025-12-06 01:32:12,652 - INFO] Start Epoch 43 | Mode: all | Alpha: base
+2025-12-06 01:32:29,922 - INFO] Start Epoch 44 | Mode: all | Alpha: base
+2025-12-06 01:32:29,927 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:32:34,044 - INFO] Testset: Kodak | 10 | PSNR: 25.50 dB | MS-SSIM: 0.0894
+2025-12-06 01:32:34,496 - INFO] Best Model Saved! PSNR: 25.4990
+2025-12-06 01:32:50,490 - INFO] Start Epoch 45 | Mode: all | Alpha: base
+2025-12-06 01:33:08,062 - INFO] Start Epoch 46 | Mode: all | Alpha: base
+2025-12-06 01:33:25,176 - INFO] Start Epoch 47 | Mode: all | Alpha: base
+2025-12-06 01:33:41,116 - INFO] Start Epoch 48 | Mode: all | Alpha: base
+2025-12-06 01:33:57,042 - INFO] Start Epoch 49 | Mode: all | Alpha: base
+2025-12-06 01:33:57,045 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:34:01,204 - INFO] Testset: Kodak | 10 | PSNR: 25.74 dB | MS-SSIM: 0.0847
+2025-12-06 01:34:01,669 - INFO] Best Model Saved! PSNR: 25.7439
+2025-12-06 01:34:19,390 - INFO] Start Epoch 50 | Mode: all | Alpha: base
+2025-12-06 01:34:36,014 - INFO] Start Epoch 51 | Mode: all | Alpha: base
+2025-12-06 01:34:53,846 - INFO] Start Epoch 52 | Mode: all | Alpha: base
+2025-12-06 01:35:10,788 - INFO] Start Epoch 53 | Mode: all | Alpha: base
+2025-12-06 01:35:28,754 - INFO] Start Epoch 54 | Mode: all | Alpha: base
+2025-12-06 01:35:28,758 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:35:32,882 - INFO] Testset: Kodak | 10 | PSNR: 24.12 dB | MS-SSIM: 0.0994
+2025-12-06 01:35:49,045 - INFO] Start Epoch 55 | Mode: all | Alpha: base
+2025-12-06 01:36:05,717 - INFO] Start Epoch 56 | Mode: all | Alpha: base
+2025-12-06 01:36:23,081 - INFO] Start Epoch 57 | Mode: all | Alpha: base
+2025-12-06 01:36:39,876 - INFO] Start Epoch 58 | Mode: all | Alpha: base
+2025-12-06 01:36:58,188 - INFO] Start Epoch 59 | Mode: all | Alpha: base
+2025-12-06 01:36:58,192 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:37:02,333 - INFO] Testset: Kodak | 10 | PSNR: 25.09 dB | MS-SSIM: 0.0742
+2025-12-06 01:37:18,369 - INFO] Start Epoch 60 | Mode: all | Alpha: base
+2025-12-06 01:37:37,699 - INFO] Start Epoch 61 | Mode: all | Alpha: base
+2025-12-06 01:37:54,782 - INFO] Start Epoch 62 | Mode: all | Alpha: base
+2025-12-06 01:38:11,682 - INFO] Start Epoch 63 | Mode: all | Alpha: base
+2025-12-06 01:38:27,875 - INFO] Start Epoch 64 | Mode: all | Alpha: base
+2025-12-06 01:38:27,879 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:38:32,014 - INFO] Testset: Kodak | 10 | PSNR: 26.28 dB | MS-SSIM: 0.0668
+2025-12-06 01:38:32,494 - INFO] Best Model Saved! PSNR: 26.2768
+2025-12-06 01:38:49,370 - INFO] Start Epoch 65 | Mode: all | Alpha: base
+2025-12-06 01:39:06,035 - INFO] Start Epoch 66 | Mode: all | Alpha: base
+2025-12-06 01:39:24,820 - INFO] Start Epoch 67 | Mode: all | Alpha: base
+2025-12-06 01:39:41,952 - INFO] Start Epoch 68 | Mode: all | Alpha: base
+2025-12-06 01:40:00,574 - INFO] Start Epoch 69 | Mode: all | Alpha: base
+2025-12-06 01:40:00,578 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:40:04,863 - INFO] Testset: Kodak | 10 | PSNR: 26.66 dB | MS-SSIM: 0.0584
+2025-12-06 01:40:05,328 - INFO] Best Model Saved! PSNR: 26.6647
+2025-12-06 01:40:21,945 - INFO] Start Epoch 70 | Mode: all | Alpha: base
+2025-12-06 01:40:38,743 - INFO] Start Epoch 71 | Mode: all | Alpha: base
+2025-12-06 01:40:55,934 - INFO] Start Epoch 72 | Mode: all | Alpha: base
+2025-12-06 01:41:13,637 - INFO] Start Epoch 73 | Mode: all | Alpha: base
+2025-12-06 01:41:30,053 - INFO] Start Epoch 74 | Mode: all | Alpha: base
+2025-12-06 01:41:30,057 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:41:34,222 - INFO] Testset: Kodak | 10 | PSNR: 26.84 dB | MS-SSIM: 0.0552
+2025-12-06 01:41:34,698 - INFO] Best Model Saved! PSNR: 26.8424
+2025-12-06 01:41:51,590 - INFO] Start Epoch 75 | Mode: all | Alpha: base
+2025-12-06 01:42:09,194 - INFO] Start Epoch 76 | Mode: all | Alpha: base
+2025-12-06 01:42:26,759 - INFO] Start Epoch 77 | Mode: all | Alpha: base
+2025-12-06 01:42:43,925 - INFO] Start Epoch 78 | Mode: all | Alpha: base
+2025-12-06 01:43:00,236 - INFO] Start Epoch 79 | Mode: all | Alpha: base
+2025-12-06 01:43:00,241 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:43:04,373 - INFO] Testset: Kodak | 10 | PSNR: 26.66 dB | MS-SSIM: 0.0536
+2025-12-06 01:43:21,821 - INFO] Start Epoch 80 | Mode: all | Alpha: base
+2025-12-06 01:43:38,629 - INFO] Start Epoch 81 | Mode: all | Alpha: base
+2025-12-06 01:43:56,564 - INFO] Start Epoch 82 | Mode: all | Alpha: base
+2025-12-06 01:44:14,594 - INFO] Start Epoch 83 | Mode: all | Alpha: base
+2025-12-06 01:44:32,071 - INFO] Start Epoch 84 | Mode: all | Alpha: base
+2025-12-06 01:44:32,074 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:44:36,280 - INFO] Testset: Kodak | 10 | PSNR: 26.76 dB | MS-SSIM: 0.0539
+2025-12-06 01:44:53,736 - INFO] Start Epoch 85 | Mode: all | Alpha: base
+2025-12-06 01:45:09,973 - INFO] Start Epoch 86 | Mode: all | Alpha: base
+2025-12-06 01:45:27,301 - INFO] Start Epoch 87 | Mode: all | Alpha: base
+2025-12-06 01:45:45,085 - INFO] Start Epoch 88 | Mode: all | Alpha: base
+2025-12-06 01:46:02,294 - INFO] Start Epoch 89 | Mode: all | Alpha: base
+2025-12-06 01:46:02,299 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:46:06,373 - INFO] Testset: Kodak | 10 | PSNR: 27.10 dB | MS-SSIM: 0.0493
+2025-12-06 01:46:06,806 - INFO] Best Model Saved! PSNR: 27.0955
+2025-12-06 01:46:23,607 - INFO] Start Epoch 90 | Mode: all | Alpha: base
+2025-12-06 01:46:40,488 - INFO] Start Epoch 91 | Mode: all | Alpha: base
+2025-12-06 01:46:58,219 - INFO] Start Epoch 92 | Mode: all | Alpha: base
+2025-12-06 01:47:15,259 - INFO] Start Epoch 93 | Mode: all | Alpha: base
+2025-12-06 01:47:32,924 - INFO] Start Epoch 94 | Mode: all | Alpha: base
+2025-12-06 01:47:32,927 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:47:37,194 - INFO] Testset: Kodak | 10 | PSNR: 26.99 dB | MS-SSIM: 0.0489
+2025-12-06 01:47:54,528 - INFO] Start Epoch 95 | Mode: all | Alpha: base
+2025-12-06 01:48:12,781 - INFO] Start Epoch 96 | Mode: all | Alpha: base
+2025-12-06 01:48:29,530 - INFO] Start Epoch 97 | Mode: all | Alpha: base
+2025-12-06 01:48:46,645 - INFO] Start Epoch 98 | Mode: all | Alpha: base
+2025-12-06 01:49:04,975 - INFO] Start Epoch 99 | Mode: all | Alpha: base
+2025-12-06 01:49:04,979 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:49:09,102 - INFO] Testset: Kodak | 10 | PSNR: 26.85 dB | MS-SSIM: 0.0515
+2025-12-06 01:49:25,830 - INFO] Epoch 100 [23] | Loss 0.0031 | SNR 10
+2025-12-06 01:49:25,836 - INFO] Start Epoch 100 | Mode: all | Alpha: base
+2025-12-06 01:49:44,135 - INFO] Start Epoch 101 | Mode: all | Alpha: base
+2025-12-06 01:50:01,203 - INFO] Start Epoch 102 | Mode: all | Alpha: base
+2025-12-06 01:50:18,758 - INFO] Start Epoch 103 | Mode: all | Alpha: base
+2025-12-06 01:50:37,904 - INFO] Start Epoch 104 | Mode: all | Alpha: base
+2025-12-06 01:50:37,908 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:50:42,052 - INFO] Testset: Kodak | 10 | PSNR: 27.05 dB | MS-SSIM: 0.0472
+2025-12-06 01:50:58,865 - INFO] Start Epoch 105 | Mode: all | Alpha: base
+2025-12-06 01:51:17,307 - INFO] Start Epoch 106 | Mode: all | Alpha: base
+2025-12-06 01:51:34,328 - INFO] Start Epoch 107 | Mode: all | Alpha: base
+2025-12-06 01:51:50,908 - INFO] Start Epoch 108 | Mode: all | Alpha: base
+2025-12-06 01:52:08,063 - INFO] Start Epoch 109 | Mode: all | Alpha: base
+2025-12-06 01:52:08,067 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:52:12,199 - INFO] Testset: Kodak | 10 | PSNR: 27.46 dB | MS-SSIM: 0.0414
+2025-12-06 01:52:12,654 - INFO] Best Model Saved! PSNR: 27.4571
+2025-12-06 01:52:29,014 - INFO] Start Epoch 110 | Mode: all | Alpha: base
+2025-12-06 01:52:47,158 - INFO] Start Epoch 111 | Mode: all | Alpha: base
+2025-12-06 01:53:04,918 - INFO] Start Epoch 112 | Mode: all | Alpha: base
+2025-12-06 01:53:22,276 - INFO] Start Epoch 113 | Mode: all | Alpha: base
+2025-12-06 01:53:38,438 - INFO] Start Epoch 114 | Mode: all | Alpha: base
+2025-12-06 01:53:38,442 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:53:42,610 - INFO] Testset: Kodak | 10 | PSNR: 27.56 dB | MS-SSIM: 0.0392
+2025-12-06 01:53:43,064 - INFO] Best Model Saved! PSNR: 27.5579
+2025-12-06 01:53:59,929 - INFO] Start Epoch 115 | Mode: all | Alpha: base
+2025-12-06 01:54:17,487 - INFO] Start Epoch 116 | Mode: all | Alpha: base
+2025-12-06 01:54:34,994 - INFO] Start Epoch 117 | Mode: all | Alpha: base
+2025-12-06 01:54:55,423 - INFO] Start Epoch 118 | Mode: all | Alpha: base
+2025-12-06 01:55:12,556 - INFO] Start Epoch 119 | Mode: all | Alpha: base
+2025-12-06 01:55:12,560 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:55:16,701 - INFO] Testset: Kodak | 10 | PSNR: 27.39 dB | MS-SSIM: 0.0415
+2025-12-06 01:55:34,480 - INFO] Start Epoch 120 | Mode: all | Alpha: base
+2025-12-06 01:55:50,197 - INFO] Start Epoch 121 | Mode: all | Alpha: base
+2025-12-06 01:56:07,538 - INFO] Start Epoch 122 | Mode: all | Alpha: base
+2025-12-06 01:56:24,126 - INFO] Start Epoch 123 | Mode: all | Alpha: base
+2025-12-06 01:56:41,053 - INFO] Start Epoch 124 | Mode: all | Alpha: base
+2025-12-06 01:56:41,056 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:56:45,160 - INFO] Testset: Kodak | 10 | PSNR: 27.63 dB | MS-SSIM: 0.0376
+2025-12-06 01:56:45,599 - INFO] Best Model Saved! PSNR: 27.6335
+2025-12-06 01:57:02,697 - INFO] Start Epoch 125 | Mode: all | Alpha: base
+2025-12-06 01:57:19,207 - INFO] Start Epoch 126 | Mode: all | Alpha: base
+2025-12-06 01:57:36,926 - INFO] Start Epoch 127 | Mode: all | Alpha: base
+2025-12-06 01:57:53,117 - INFO] Start Epoch 128 | Mode: all | Alpha: base
+2025-12-06 01:58:10,471 - INFO] Start Epoch 129 | Mode: all | Alpha: base
+2025-12-06 01:58:10,476 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:58:14,590 - INFO] Testset: Kodak | 10 | PSNR: 27.93 dB | MS-SSIM: 0.0370
+2025-12-06 01:58:15,035 - INFO] Best Model Saved! PSNR: 27.9333
+2025-12-06 01:58:31,730 - INFO] Start Epoch 130 | Mode: all | Alpha: base
+2025-12-06 01:58:48,873 - INFO] Start Epoch 131 | Mode: all | Alpha: base
+2025-12-06 01:59:06,849 - INFO] Start Epoch 132 | Mode: all | Alpha: base
+2025-12-06 01:59:25,659 - INFO] Start Epoch 133 | Mode: all | Alpha: base
+2025-12-06 01:59:43,057 - INFO] Start Epoch 134 | Mode: all | Alpha: base
+2025-12-06 01:59:43,061 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 01:59:47,185 - INFO] Testset: Kodak | 10 | PSNR: 28.00 dB | MS-SSIM: 0.0373
+2025-12-06 01:59:47,660 - INFO] Best Model Saved! PSNR: 28.0044
+2025-12-06 02:00:05,317 - INFO] Start Epoch 135 | Mode: all | Alpha: base
+2025-12-06 02:00:22,813 - INFO] Start Epoch 136 | Mode: all | Alpha: base
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+2025-12-06 02:04:12,450 - INFO] Initializing E2E-IST...
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+2025-12-06 02:04:12,745 - INFO] Network config: 
+2025-12-06 02:04:12,745 - INFO] Encoder: {'embed_dims': [128, 192, 256, 320], 'depths': [2, 2, 6, 2], 'num_heads': [4, 6, 8, 10], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+2025-12-06 02:04:12,745 - INFO] Decoder: {'embed_dims': [320, 256, 192, 128], 'depths': [2, 6, 2, 2], 'num_heads': [10, 8, 6, 4], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.
+Encoder  dim=3, input_resolution=(256, 256), depth=2
+Encoder  dim=128, input_resolution=(128, 128), depth=2
+Encoder  dim=192, input_resolution=(64, 64), depth=6
+Encoder  dim=256, input_resolution=(32, 32), depth=2
+Decoder  dim=320, input_resolution=(16, 16), depth=2
+Decoder  dim=256, input_resolution=(32, 32), depth=6
+Decoder  dim=192, input_resolution=(64, 64), depth=2
+Decoder  dim=128, input_resolution=(128, 128), depth=2
+Using 4 GPUs!
+[*] DIV2K Train dataset found at /data4/hongsik/data/DIV2K/DIV2K_train_HR
+[*] Kodak dataset found at /data4/hongsik/data/Kodak
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:71: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn(
+2025-12-06 02:04:28,889 - INFO] Epoch 0 [23] | Loss 0.0340 | SNR 10
+2025-12-06 02:04:28,898 - INFO] Start Epoch 0 | Mode: all | Alpha: base
+2025-12-06 02:05:32,395 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:05:36,756 - INFO] Testset: Kodak | 10 | PSNR: 19.68 dB | MS-SSIM: 0.3240
+2025-12-06 02:05:36,876 - INFO] Best Model Saved! PSNR: 19.6846
+2025-12-06 02:06:58,750 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:07:02,879 - INFO] Testset: Kodak | 10 | PSNR: 21.14 dB | MS-SSIM: 0.2563
+2025-12-06 02:07:03,328 - INFO] Best Model Saved! PSNR: 21.1383
+2025-12-06 02:08:27,229 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:08:31,389 - INFO] Testset: Kodak | 10 | PSNR: 22.48 dB | MS-SSIM: 0.1820
+2025-12-06 02:08:31,855 - INFO] Best Model Saved! PSNR: 22.4756
+2025-12-06 02:09:58,422 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:10:02,689 - INFO] Testset: Kodak | 10 | PSNR: 23.73 dB | MS-SSIM: 0.1580
+2025-12-06 02:10:03,161 - INFO] Best Model Saved! PSNR: 23.7305
+2025-12-06 02:11:29,672 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:11:33,796 - INFO] Testset: Kodak | 10 | PSNR: 24.06 dB | MS-SSIM: 0.1356
+2025-12-06 02:11:34,253 - INFO] Best Model Saved! PSNR: 24.0622
+2025-12-06 02:12:59,659 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:13:03,887 - INFO] Testset: Kodak | 10 | PSNR: 23.92 dB | MS-SSIM: 0.1288
+2025-12-06 02:14:30,969 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:14:35,156 - INFO] Testset: Kodak | 10 | PSNR: 24.64 dB | MS-SSIM: 0.1115
+2025-12-06 02:14:35,603 - INFO] Best Model Saved! PSNR: 24.6406
+2025-12-06 02:16:02,654 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:16:06,799 - INFO] Testset: Kodak | 10 | PSNR: 24.99 dB | MS-SSIM: 0.1018
+2025-12-06 02:16:07,240 - INFO] Best Model Saved! PSNR: 24.9898
+2025-12-06 02:17:33,657 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:17:37,935 - INFO] Testset: Kodak | 10 | PSNR: 25.50 dB | MS-SSIM: 0.0894
+2025-12-06 02:17:38,366 - INFO] Best Model Saved! PSNR: 25.4990
+2025-12-06 02:19:06,355 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:19:10,518 - INFO] Testset: Kodak | 10 | PSNR: 25.74 dB | MS-SSIM: 0.0847
+2025-12-06 02:19:11,013 - INFO] Best Model Saved! PSNR: 25.7439
+2025-12-06 02:20:38,168 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:20:42,275 - INFO] Testset: Kodak | 10 | PSNR: 24.12 dB | MS-SSIM: 0.0994
+2025-12-06 02:22:11,595 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:22:15,751 - INFO] Testset: Kodak | 10 | PSNR: 25.09 dB | MS-SSIM: 0.0742
+2025-12-06 02:23:43,432 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:23:47,626 - INFO] Testset: Kodak | 10 | PSNR: 26.28 dB | MS-SSIM: 0.0668
+2025-12-06 02:23:48,095 - INFO] Best Model Saved! PSNR: 26.2768
+2025-12-06 02:25:10,845 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:25:14,999 - INFO] Testset: Kodak | 10 | PSNR: 26.66 dB | MS-SSIM: 0.0584
+2025-12-06 02:25:15,468 - INFO] Best Model Saved! PSNR: 26.6647
+2025-12-06 02:26:42,296 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:26:46,435 - INFO] Testset: Kodak | 10 | PSNR: 26.84 dB | MS-SSIM: 0.0552
+2025-12-06 02:26:46,908 - INFO] Best Model Saved! PSNR: 26.8424
+2025-12-06 02:28:13,041 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:28:17,175 - INFO] Testset: Kodak | 10 | PSNR: 26.66 dB | MS-SSIM: 0.0536
+2025-12-06 02:29:44,461 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:29:48,600 - INFO] Testset: Kodak | 10 | PSNR: 26.76 dB | MS-SSIM: 0.0539
+2025-12-06 02:31:12,725 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:31:16,883 - INFO] Testset: Kodak | 10 | PSNR: 27.10 dB | MS-SSIM: 0.0493
+2025-12-06 02:31:17,326 - INFO] Best Model Saved! PSNR: 27.0955
+2025-12-06 02:32:44,373 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:32:48,520 - INFO] Testset: Kodak | 10 | PSNR: 26.99 dB | MS-SSIM: 0.0489
+2025-12-06 02:34:15,199 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:34:19,824 - INFO] Testset: Kodak | 10 | PSNR: 26.85 dB | MS-SSIM: 0.0515
+2025-12-06 02:34:37,309 - INFO] Epoch 100 [23] | Loss 0.0031 | SNR 10
+2025-12-06 02:34:37,317 - INFO] Start Epoch 100 | Mode: all | Alpha: base
+2025-12-06 02:35:52,578 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:35:56,696 - INFO] Testset: Kodak | 10 | PSNR: 27.05 dB | MS-SSIM: 0.0472
+2025-12-06 02:37:23,431 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:37:27,624 - INFO] Testset: Kodak | 10 | PSNR: 27.46 dB | MS-SSIM: 0.0414
+2025-12-06 02:37:28,082 - INFO] Best Model Saved! PSNR: 27.4571
+2025-12-06 02:38:55,060 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:38:59,224 - INFO] Testset: Kodak | 10 | PSNR: 27.56 dB | MS-SSIM: 0.0392
+2025-12-06 02:38:59,675 - INFO] Best Model Saved! PSNR: 27.5579
+2025-12-06 02:40:24,885 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:40:29,074 - INFO] Testset: Kodak | 10 | PSNR: 27.39 dB | MS-SSIM: 0.0415
+2025-12-06 02:41:55,595 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:41:59,713 - INFO] Testset: Kodak | 10 | PSNR: 27.63 dB | MS-SSIM: 0.0376
+2025-12-06 02:42:00,147 - INFO] Best Model Saved! PSNR: 27.6335
+2025-12-06 02:43:31,425 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:43:35,664 - INFO] Testset: Kodak | 10 | PSNR: 27.93 dB | MS-SSIM: 0.0370
+2025-12-06 02:43:36,150 - INFO] Best Model Saved! PSNR: 27.9333
+2025-12-06 02:45:04,893 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:45:09,021 - INFO] Testset: Kodak | 10 | PSNR: 28.00 dB | MS-SSIM: 0.0373
+2025-12-06 02:45:09,465 - INFO] Best Model Saved! PSNR: 28.0044
+2025-12-06 02:46:33,745 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:46:37,912 - INFO] Testset: Kodak | 10 | PSNR: 28.06 dB | MS-SSIM: 0.0347
+2025-12-06 02:46:38,340 - INFO] Best Model Saved! PSNR: 28.0632
+2025-12-06 02:48:07,519 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:48:11,695 - INFO] Testset: Kodak | 10 | PSNR: 28.39 dB | MS-SSIM: 0.0343
+2025-12-06 02:48:12,146 - INFO] Best Model Saved! PSNR: 28.3879
+2025-12-06 02:49:41,141 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:49:45,235 - INFO] Testset: Kodak | 10 | PSNR: 27.64 dB | MS-SSIM: 0.0393
+2025-12-06 02:51:14,188 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:51:18,343 - INFO] Testset: Kodak | 10 | PSNR: 27.38 dB | MS-SSIM: 0.0420
+2025-12-06 02:52:43,771 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:52:47,989 - INFO] Testset: Kodak | 10 | PSNR: 28.21 dB | MS-SSIM: 0.0354
+2025-12-06 02:54:14,775 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:54:18,987 - INFO] Testset: Kodak | 10 | PSNR: 28.64 dB | MS-SSIM: 0.0340
+2025-12-06 02:54:19,419 - INFO] Best Model Saved! PSNR: 28.6438
+2025-12-06 02:55:43,578 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:55:47,680 - INFO] Testset: Kodak | 10 | PSNR: 28.80 dB | MS-SSIM: 0.0324
+2025-12-06 02:55:48,167 - INFO] Best Model Saved! PSNR: 28.8016
+2025-12-06 02:57:14,817 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:57:19,099 - INFO] Testset: Kodak | 10 | PSNR: 28.68 dB | MS-SSIM: 0.0308
+2025-12-06 02:58:47,693 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 02:58:51,883 - INFO] Testset: Kodak | 10 | PSNR: 29.34 dB | MS-SSIM: 0.0279
+2025-12-06 02:58:52,338 - INFO] Best Model Saved! PSNR: 29.3441
+2025-12-06 03:00:21,393 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:00:25,579 - INFO] Testset: Kodak | 10 | PSNR: 29.66 dB | MS-SSIM: 0.0256
+2025-12-06 03:00:26,050 - INFO] Best Model Saved! PSNR: 29.6600
+2025-12-06 03:01:55,170 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:01:59,291 - INFO] Testset: Kodak | 10 | PSNR: 28.07 dB | MS-SSIM: 0.0339
+2025-12-06 03:03:25,691 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:03:29,866 - INFO] Testset: Kodak | 10 | PSNR: 29.45 dB | MS-SSIM: 0.0267
+2025-12-06 03:04:59,222 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:05:03,815 - INFO] Testset: Kodak | 10 | PSNR: 29.79 dB | MS-SSIM: 0.0253
+2025-12-06 03:05:04,265 - INFO] Best Model Saved! PSNR: 29.7883
+2025-12-06 03:05:21,319 - INFO] Epoch 200 [23] | Loss 0.0018 | SNR 10
+2025-12-06 03:05:21,327 - INFO] Start Epoch 200 | Mode: all | Alpha: base
+2025-12-06 03:06:33,796 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:06:38,141 - INFO] Testset: Kodak | 10 | PSNR: 29.45 dB | MS-SSIM: 0.0234
+2025-12-06 03:08:06,301 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:08:10,426 - INFO] Testset: Kodak | 10 | PSNR: 28.75 dB | MS-SSIM: 0.0250
+2025-12-06 03:09:37,115 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:09:41,329 - INFO] Testset: Kodak | 10 | PSNR: 29.83 dB | MS-SSIM: 0.0231
+2025-12-06 03:09:41,761 - INFO] Best Model Saved! PSNR: 29.8269
+2025-12-06 03:11:08,012 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:11:12,170 - INFO] Testset: Kodak | 10 | PSNR: 30.09 dB | MS-SSIM: 0.0219
+2025-12-06 03:11:12,616 - INFO] Best Model Saved! PSNR: 30.0908
+2025-12-06 03:12:39,112 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:12:43,276 - INFO] Testset: Kodak | 10 | PSNR: 29.88 dB | MS-SSIM: 0.0218
+2025-12-06 03:14:11,595 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:14:15,819 - INFO] Testset: Kodak | 10 | PSNR: 30.12 dB | MS-SSIM: 0.0204
+2025-12-06 03:14:16,289 - INFO] Best Model Saved! PSNR: 30.1216
+2025-12-06 03:15:41,219 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:15:45,405 - INFO] Testset: Kodak | 10 | PSNR: 30.37 dB | MS-SSIM: 0.0218
+2025-12-06 03:15:45,847 - INFO] Best Model Saved! PSNR: 30.3735
+2025-12-06 03:17:11,823 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:17:16,086 - INFO] Testset: Kodak | 10 | PSNR: 30.49 dB | MS-SSIM: 0.0211
+2025-12-06 03:17:16,543 - INFO] Best Model Saved! PSNR: 30.4904
+2025-12-06 03:18:43,635 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:18:47,995 - INFO] Testset: Kodak | 10 | PSNR: 30.88 dB | MS-SSIM: 0.0187
+2025-12-06 03:18:48,447 - INFO] Best Model Saved! PSNR: 30.8766
+2025-12-06 03:20:16,228 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:20:20,607 - INFO] Testset: Kodak | 10 | PSNR: 30.67 dB | MS-SSIM: 0.0184
+2025-12-06 03:21:48,978 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:21:53,191 - INFO] Testset: Kodak | 10 | PSNR: 27.15 dB | MS-SSIM: 0.0315
+2025-12-06 03:23:20,305 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:23:24,552 - INFO] Testset: Kodak | 10 | PSNR: 29.85 dB | MS-SSIM: 0.0206
+2025-12-06 03:24:48,769 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:24:52,937 - INFO] Testset: Kodak | 10 | PSNR: 30.97 dB | MS-SSIM: 0.0172
+2025-12-06 03:24:53,390 - INFO] Best Model Saved! PSNR: 30.9698
+2025-12-06 03:26:22,363 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:26:26,561 - INFO] Testset: Kodak | 10 | PSNR: 30.18 dB | MS-SSIM: 0.0202
+2025-12-06 03:27:55,359 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:27:59,697 - INFO] Testset: Kodak | 10 | PSNR: 31.15 dB | MS-SSIM: 0.0171
+2025-12-06 03:28:00,140 - INFO] Best Model Saved! PSNR: 31.1522
+2025-12-06 03:29:28,796 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:29:33,109 - INFO] Testset: Kodak | 10 | PSNR: 30.77 dB | MS-SSIM: 0.0167
+2025-12-06 03:31:00,720 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:31:04,921 - INFO] Testset: Kodak | 10 | PSNR: 29.79 dB | MS-SSIM: 0.0187
+2025-12-06 03:32:27,784 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:32:32,032 - INFO] Testset: Kodak | 10 | PSNR: 30.72 dB | MS-SSIM: 0.0177
+2025-12-06 03:33:57,005 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 03:34:01,128 - INFO] Testset: Kodak | 10 | PSNR: 31.10 dB | MS-SSIM: 0.0171
+2025-12-06 03:34:01,129 - INFO] Early Stopping.
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+2025-12-06 08:48:56,483 - INFO] Initializing E2E-IST...
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+2025-12-06 08:48:56,763 - INFO] Network config: 
+2025-12-06 08:48:56,763 - INFO] Encoder: {'embed_dims': [128, 192, 256, 320], 'depths': [2, 2, 6, 2], 'num_heads': [4, 6, 8, 10], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+2025-12-06 08:48:56,763 - INFO] Decoder: {'embed_dims': [320, 256, 192, 128], 'depths': [2, 6, 2, 2], 'num_heads': [10, 8, 6, 4], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.
+Encoder  dim=3, input_resolution=(256, 256), depth=2
+Encoder  dim=128, input_resolution=(128, 128), depth=2
+Encoder  dim=192, input_resolution=(64, 64), depth=6
+Encoder  dim=256, input_resolution=(32, 32), depth=2
+Decoder  dim=320, input_resolution=(16, 16), depth=2
+Decoder  dim=256, input_resolution=(32, 32), depth=6
+Decoder  dim=192, input_resolution=(64, 64), depth=2
+Decoder  dim=128, input_resolution=(128, 128), depth=2
+Using 4 GPUs!
+[*] DIV2K Train dataset found at /data4/hongsik/data/DIV2K/DIV2K_train_HR
+[*] Kodak dataset found at /data4/hongsik/data/Kodak
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:71: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn(
+2025-12-06 08:49:12,834 - INFO] Epoch 0 [23] | Loss 0.0340 | SNR 10
+2025-12-06 08:49:12,841 - INFO] Start Epoch 0 | Mode: all | Alpha: base
+2025-12-06 08:50:15,486 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:50:19,861 - INFO] Testset: Kodak | 10 | PSNR: 19.92 dB | MS-SSIM: 0.3203
+2025-12-06 08:50:19,979 - INFO] Best Model Saved! PSNR: 19.9152
+2025-12-06 08:51:43,103 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:51:47,218 - INFO] Testset: Kodak | 10 | PSNR: 21.25 dB | MS-SSIM: 0.2592
+2025-12-06 08:51:47,652 - INFO] Best Model Saved! PSNR: 21.2508
+2025-12-06 08:53:10,992 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:53:15,137 - INFO] Testset: Kodak | 10 | PSNR: 22.43 dB | MS-SSIM: 0.1882
+2025-12-06 08:53:15,626 - INFO] Best Model Saved! PSNR: 22.4277
+2025-12-06 08:54:39,646 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:54:43,841 - INFO] Testset: Kodak | 10 | PSNR: 23.46 dB | MS-SSIM: 0.1646
+2025-12-06 08:54:44,285 - INFO] Best Model Saved! PSNR: 23.4574
+2025-12-06 08:56:10,281 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:56:14,420 - INFO] Testset: Kodak | 10 | PSNR: 23.83 dB | MS-SSIM: 0.1378
+2025-12-06 08:56:14,857 - INFO] Best Model Saved! PSNR: 23.8313
+2025-12-06 08:57:39,344 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:57:43,537 - INFO] Testset: Kodak | 10 | PSNR: 24.23 dB | MS-SSIM: 0.1296
+2025-12-06 08:57:43,997 - INFO] Best Model Saved! PSNR: 24.2349
+2025-12-06 08:59:10,874 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 08:59:15,163 - INFO] Testset: Kodak | 10 | PSNR: 24.57 dB | MS-SSIM: 0.1170
+2025-12-06 08:59:15,595 - INFO] Best Model Saved! PSNR: 24.5690
+2025-12-06 09:00:41,053 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:00:45,265 - INFO] Testset: Kodak | 10 | PSNR: 24.80 dB | MS-SSIM: 0.1083
+2025-12-06 09:00:45,678 - INFO] Best Model Saved! PSNR: 24.7963
+2025-12-06 09:02:15,334 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:02:19,518 - INFO] Testset: Kodak | 10 | PSNR: 24.58 dB | MS-SSIM: 0.0985
+2025-12-06 09:03:46,602 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:03:51,318 - INFO] Testset: Kodak | 10 | PSNR: 25.45 dB | MS-SSIM: 0.0903
+2025-12-06 09:03:51,811 - INFO] Best Model Saved! PSNR: 25.4527
+2025-12-06 09:05:16,472 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:05:20,626 - INFO] Testset: Kodak | 10 | PSNR: 25.77 dB | MS-SSIM: 0.0802
+2025-12-06 09:05:21,079 - INFO] Best Model Saved! PSNR: 25.7749
+2025-12-06 09:06:47,979 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:06:52,128 - INFO] Testset: Kodak | 10 | PSNR: 25.39 dB | MS-SSIM: 0.0790
+2025-12-06 09:08:17,466 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:08:21,615 - INFO] Testset: Kodak | 10 | PSNR: 26.26 dB | MS-SSIM: 0.0658
+2025-12-06 09:08:22,051 - INFO] Best Model Saved! PSNR: 26.2567
+2025-12-06 09:09:47,783 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:09:51,953 - INFO] Testset: Kodak | 10 | PSNR: 26.46 dB | MS-SSIM: 0.0598
+2025-12-06 09:09:52,384 - INFO] Best Model Saved! PSNR: 26.4599
+2025-12-06 09:11:19,294 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:11:23,504 - INFO] Testset: Kodak | 10 | PSNR: 26.65 dB | MS-SSIM: 0.0658
+2025-12-06 09:11:23,953 - INFO] Best Model Saved! PSNR: 26.6517
+2025-12-06 09:12:50,046 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:12:54,217 - INFO] Testset: Kodak | 10 | PSNR: 25.62 dB | MS-SSIM: 0.0602
+2025-12-06 09:14:23,801 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:14:28,069 - INFO] Testset: Kodak | 10 | PSNR: 26.18 dB | MS-SSIM: 0.0530
+2025-12-06 09:15:58,853 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:16:03,010 - INFO] Testset: Kodak | 10 | PSNR: 27.14 dB | MS-SSIM: 0.0476
+2025-12-06 09:16:03,484 - INFO] Best Model Saved! PSNR: 27.1370
+2025-12-06 09:17:32,603 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:17:36,818 - INFO] Testset: Kodak | 10 | PSNR: 27.23 dB | MS-SSIM: 0.0467
+2025-12-06 09:17:37,257 - INFO] Best Model Saved! PSNR: 27.2340
+2025-12-06 09:19:05,251 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:19:09,796 - INFO] Testset: Kodak | 10 | PSNR: 26.75 dB | MS-SSIM: 0.0534
+2025-12-06 09:19:27,156 - INFO] Epoch 100 [23] | Loss 0.0032 | SNR 10
+2025-12-06 09:19:27,163 - INFO] Start Epoch 100 | Mode: all | Alpha: base
+2025-12-06 09:20:34,595 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:20:38,732 - INFO] Testset: Kodak | 10 | PSNR: 27.07 dB | MS-SSIM: 0.0436
+2025-12-06 09:22:06,077 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:22:10,203 - INFO] Testset: Kodak | 10 | PSNR: 27.56 dB | MS-SSIM: 0.0412
+2025-12-06 09:22:10,661 - INFO] Best Model Saved! PSNR: 27.5567
+2025-12-06 09:23:36,678 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:23:40,824 - INFO] Testset: Kodak | 10 | PSNR: 27.69 dB | MS-SSIM: 0.0391
+2025-12-06 09:23:41,264 - INFO] Best Model Saved! PSNR: 27.6945
+2025-12-06 09:25:12,216 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:25:16,353 - INFO] Testset: Kodak | 10 | PSNR: 27.18 dB | MS-SSIM: 0.0394
+2025-12-06 09:26:43,617 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:26:47,746 - INFO] Testset: Kodak | 10 | PSNR: 27.98 dB | MS-SSIM: 0.0380
+2025-12-06 09:26:48,220 - INFO] Best Model Saved! PSNR: 27.9753
+2025-12-06 09:28:13,318 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:28:17,452 - INFO] Testset: Kodak | 10 | PSNR: 27.90 dB | MS-SSIM: 0.0394
+2025-12-06 09:29:42,509 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:29:46,676 - INFO] Testset: Kodak | 10 | PSNR: 28.21 dB | MS-SSIM: 0.0359
+2025-12-06 09:29:47,119 - INFO] Best Model Saved! PSNR: 28.2128
+2025-12-06 09:31:15,576 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:31:19,726 - INFO] Testset: Kodak | 10 | PSNR: 27.14 dB | MS-SSIM: 0.0489
+2025-12-06 09:32:47,386 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:32:51,647 - INFO] Testset: Kodak | 10 | PSNR: 27.80 dB | MS-SSIM: 0.0414
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+2025-12-06 09:37:48,491 - INFO] Initializing E2E-IST...
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/functional.py:534: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3595.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+2025-12-06 09:37:48,772 - INFO] Network config: 
+2025-12-06 09:37:48,772 - INFO] Encoder: {'embed_dims': [128, 192, 256, 320], 'depths': [2, 2, 6, 2], 'num_heads': [4, 6, 8, 10], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+2025-12-06 09:37:48,772 - INFO] Decoder: {'embed_dims': [320, 256, 192, 128], 'depths': [2, 6, 2, 2], 'num_heads': [10, 8, 6, 4], 'img_size': (256, 256), 'patch_size': 2, 'in_chans': 3, 'window_size': 8, 'mlp_ratio': 4.0, 'qkv_bias': True, 'qk_scale': None, 'norm_layer': <class 'torch.nn.modules.normalization.LayerNorm'>, 'patch_norm': True, 'model': 'E2E', 'use_ssf': False}
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/optim/lr_scheduler.py:62: UserWarning: The verbose parameter is deprecated. Please use get_last_lr() to access the learning rate.
+  warnings.warn(
+[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.
+Encoder  dim=3, input_resolution=(256, 256), depth=2
+Encoder  dim=128, input_resolution=(128, 128), depth=2
+Encoder  dim=192, input_resolution=(64, 64), depth=6
+Encoder  dim=256, input_resolution=(32, 32), depth=2
+Decoder  dim=320, input_resolution=(16, 16), depth=2
+Decoder  dim=256, input_resolution=(32, 32), depth=6
+Decoder  dim=192, input_resolution=(64, 64), depth=2
+Decoder  dim=128, input_resolution=(128, 128), depth=2
+Using 4 GPUs!
+[*] DIV2K Train dataset found at /data4/hongsik/data/DIV2K/DIV2K_train_HR
+[*] Kodak dataset found at /data4/hongsik/data/Kodak
+/data4/hongsik/envs/swinjscc/lib/python3.10/site-packages/torch/nn/parallel/_functions.py:71: UserWarning: Was asked to gather along dimension 0, but all input tensors were scalars; will instead unsqueeze and return a vector.
+  warnings.warn(
+2025-12-06 09:38:04,949 - INFO] Epoch 0 [23] | Loss 0.0238 | SNR 10
+2025-12-06 09:38:04,954 - INFO] Start Epoch 0 | Mode: all | Alpha: base
+2025-12-06 09:39:08,002 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:39:12,315 - INFO] Testset: Kodak | 10 | PSNR: 20.74 dB | MS-SSIM: 0.2962
+2025-12-06 09:39:12,421 - INFO] Best Model Saved! PSNR: 20.7359
+2025-12-06 09:40:36,603 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:40:40,716 - INFO] Testset: Kodak | 10 | PSNR: 21.32 dB | MS-SSIM: 0.2301
+2025-12-06 09:40:41,162 - INFO] Best Model Saved! PSNR: 21.3180
+2025-12-06 09:42:04,674 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:42:08,823 - INFO] Testset: Kodak | 10 | PSNR: 21.33 dB | MS-SSIM: 0.2161
+2025-12-06 09:42:09,263 - INFO] Best Model Saved! PSNR: 21.3276
+2025-12-06 09:43:34,419 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:43:38,588 - INFO] Testset: Kodak | 10 | PSNR: 23.84 dB | MS-SSIM: 0.1430
+2025-12-06 09:43:39,025 - INFO] Best Model Saved! PSNR: 23.8428
+2025-12-06 09:45:03,638 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:45:07,773 - INFO] Testset: Kodak | 10 | PSNR: 23.05 dB | MS-SSIM: 0.1434
+2025-12-06 09:46:32,362 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:46:36,481 - INFO] Testset: Kodak | 10 | PSNR: 24.07 dB | MS-SSIM: 0.1180
+2025-12-06 09:46:36,974 - INFO] Best Model Saved! PSNR: 24.0708
+2025-12-06 09:48:01,176 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:48:05,345 - INFO] Testset: Kodak | 10 | PSNR: 25.08 dB | MS-SSIM: 0.1035
+2025-12-06 09:48:05,781 - INFO] Best Model Saved! PSNR: 25.0821
+2025-12-06 09:49:31,186 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:49:35,487 - INFO] Testset: Kodak | 10 | PSNR: 25.54 dB | MS-SSIM: 0.0871
+2025-12-06 09:49:35,923 - INFO] Best Model Saved! PSNR: 25.5368
+2025-12-06 09:51:02,534 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:51:06,680 - INFO] Testset: Kodak | 10 | PSNR: 23.33 dB | MS-SSIM: 0.0939
+2025-12-06 09:52:33,709 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:52:38,304 - INFO] Testset: Kodak | 10 | PSNR: 25.85 dB | MS-SSIM: 0.0772
+2025-12-06 09:52:38,824 - INFO] Best Model Saved! PSNR: 25.8452
+2025-12-06 09:54:07,821 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:54:11,986 - INFO] Testset: Kodak | 10 | PSNR: 25.70 dB | MS-SSIM: 0.0663
+2025-12-06 09:55:37,738 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:55:41,902 - INFO] Testset: Kodak | 10 | PSNR: 26.64 dB | MS-SSIM: 0.0612
+2025-12-06 09:55:42,362 - INFO] Best Model Saved! PSNR: 26.6420
+2025-12-06 09:57:09,743 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:57:13,955 - INFO] Testset: Kodak | 10 | PSNR: 26.56 dB | MS-SSIM: 0.0569
+2025-12-06 09:58:43,138 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 09:58:47,321 - INFO] Testset: Kodak | 10 | PSNR: 21.62 dB | MS-SSIM: 0.2255
+2025-12-06 10:00:13,166 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:00:17,510 - INFO] Testset: Kodak | 10 | PSNR: 25.74 dB | MS-SSIM: 0.0782
+2025-12-06 10:01:45,679 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:01:49,905 - INFO] Testset: Kodak | 10 | PSNR: 26.44 dB | MS-SSIM: 0.0634
+2025-12-06 10:03:14,887 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:03:19,107 - INFO] Testset: Kodak | 10 | PSNR: 26.42 dB | MS-SSIM: 0.0571
+2025-12-06 10:04:45,422 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:04:49,613 - INFO] Testset: Kodak | 10 | PSNR: 27.00 dB | MS-SSIM: 0.0515
+2025-12-06 10:04:50,075 - INFO] Best Model Saved! PSNR: 26.9986
+2025-12-06 10:06:15,556 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:06:19,774 - INFO] Testset: Kodak | 10 | PSNR: 27.01 dB | MS-SSIM: 0.0504
+2025-12-06 10:06:20,210 - INFO] Best Model Saved! PSNR: 27.0111
+2025-12-06 10:07:45,182 - INFO] ====== Validation Results (Noiseless) ======
+2025-12-06 10:07:49,764 - INFO] Testset: Kodak | 10 | PSNR: 27.23 dB | MS-SSIM: 0.0494
+2025-12-06 10:07:50,241 - INFO] Best Model Saved! PSNR: 27.2285
+2025-12-06 10:08:06,834 - INFO] Epoch 100 [23] | Loss 0.0031 | SNR 10
+2025-12-06 10:08:06,841 - INFO] Start Epoch 100 | Mode: all | Alpha: base

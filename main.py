@@ -2,8 +2,7 @@ import torch.optim as optim
 from net.network import E2E_SwinJSCC
 from data.datasets import get_loader
 from utils import *
-from loss.distortion import Distortion, MS_SSIM
-from torch.utils.checkpoint import checkpoint
+from loss.distortion import MS_SSIM  # Ensure this is accessible
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import os
@@ -16,538 +15,361 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # --- 1. Arguments Configuration ---
-# =============================================================================
-# [User Guide & Arguments Explanation]
-#
-# 1. args.C (Bits per Spatial Token) [Default: 12]:
-#    - Meaning: Number of bits allocated per single feature token.
-#    - Changed default to 12 as requested.
-#
-# 2. args.beta (Beta for Info-Max) [Default: 1.0]:
-#    - Meaning: Balancing weight for MSE in the Information formula.
-#    - Formula: INFO = -CrossEntropy - (beta * MSE)
-#    - Control: Higher beta emphasizes Reconstruction (MSE), Lower beta emphasizes Classification.
-#
-# 3. args.sample_num (Monte-Carlo Sampling R) [Default: 1]:
-#    - Meaning: Number of VAE samples (R) to approximate the expectation.
-#    - Implementation: Input batch is repeated R times to calculate average loss.
-# =============================================================================
-
-# --- Arguments Configuration ---
-parser = argparse.ArgumentParser(description='E2E SwinJSCC for Classification & Recon')
+parser = argparse.ArgumentParser(description='E2E-IST for Progressive Image Transmission')
 
 # [Mode]
 parser.add_argument('--training', action='store_true', help='Flag to start training.')
-parser.add_argument('--patience', type=int, default=20, help='Early stopping patience (epochs).')
+parser.add_argument('--patience', type=int, default=50, help='Early stopping patience (epochs).')
+parser.add_argument('--pretrained', type=str, default=None, help='Path to pretrained .pth model.')
+parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate (lower for fine-tuning).')
 
 # [Dataset Settings]
-parser.add_argument('--trainset', type=str, default='CIFAR10', choices=['CIFAR10', 'ImageNet'], 
-                    help='Dataset for training.')
-# Note: Test set is automatically determined based on trainset (Validation set).
+parser.add_argument('--trainset', type=str, default='DIV2K', help='Dataset for training.')
+parser.add_argument('--testset', type=str, default='Kodak', choices=['Kodak', 'CLIC2021', 'DIV2K'])
 
-# [Communication & Model Settings]
-parser.add_argument('--channel-type', type=str, default='awgn', choices=['awgn', 'rayleigh'], 
-                    help='Wireless channel model.')
+# [Model & Channel Settings]
 parser.add_argument('--model_size', type=str, default='base', choices=['small', 'base', 'large'], 
                     help='Size of Swin Transformer backbone.')
+parser.add_argument('--channel_type', type=str, default='awgn', choices=['awgn', 'rayleigh', 'noiseless'], 
+                    help='Wireless channel model.')
+parser.add_argument('--train_snr', type=int, default=10, 
+                    help='Single SNR value (dB) used for training.')
 
-# [Key Parameters]
-parser.add_argument('--C', type=str, default='12', 
-                    help='Bits per spatial token (Default: 12).')
-parser.add_argument('--M', type=int, default=16, 
-                    help='QAM Modulation Order (16 or 64).')
-parser.add_argument('--multiple-snr', type=str, default='10', 
-                    help='Training SNR (dB). e.g., "10" or "0,10,20"')
+# [Progressive Strategy]
+parser.add_argument('--alpha_mode', type=str, default='base', 
+                    choices=['base', 'linear', 'inverse', 'square', 'exponential', 'uniform'],
+                    help="'base' = Non-progressive (All-at-once). Others = Progressive weights.")
+parser.add_argument('--progressive_mode', type=str, default='progressive', 
+                    choices=['progressive', 'adaptive'],
+                    help="Only valid if alpha_mode != 'base'. 'adaptive' uses SSF.")
 
-# [Info-Max Parameters]
-parser.add_argument('--beta', type=float, default=2500.0, 
-                    help='Weight for MSE term in Info calculation (Info = -CE - beta*MSE).')
-parser.add_argument('--alpha_mode', type=str, default='linear', 
-                    choices=['linear', 'inverse', 'square', 'exponential', 'uniform'],
-                    help='Decaying mode for alpha sequence.')
-# ALM on/off 옵션
-parser.add_argument('--use_alm', type=int, default=1,
-                    choices=[0, 1],
-                    help='Enable (1) or disable (0) ALM-based constraints.')
+# [Adaptive / SSF Settings]
+parser.add_argument('--ssf_target', type=str, default='both', choices=['enc', 'dec', 'both'],
+                    help="Where to enable SSF in 'adaptive' mode.")
 
-parser.add_argument('--sample_num', type=int, default=1, 
-                    help='Number of Monte-Carlo samples (R) for expectation approximation.')
+# [Visualization Range]
+parser.add_argument('--save_start', type=int, default=192, help='Start index for saving recon images.')
+parser.add_argument('--save_end', type=int, default=192, help='End index for saving recon images.')
 
 args = parser.parse_args()
 
-# --- Global Variables for ALM ---
-# rho, gamma, lambda_l, prev_h_norm are used when ALM is enabled.
-rho = 1.0       
-gamma = 1.2     
-lambda_l = None 
-prev_h_norm = None  # 지난 epoch의 제약 norm (for rho update)
+# --- 2. Logic Setup (Alpha & Mode) ---
+# alpha_mode가 'base'이면 -> Base Model 학습 (Loop 없음, 마지막만 최적화)
+if args.alpha_mode == 'base':
+    args.progressive_mode = 'all'
+    use_ssf = False
+    print(f"[*] Alpha Mode is 'base'. Switching to Fast Path (progressive_mode='all'). SSF Disabled.")
+else:
+    # [Rule 3 & 4]
+    print(f"[*] Alpha Mode is '{args.alpha_mode}'. Using Weighted MSE Loss (ALM).")
+    if args.progressive_mode == 'adaptive':
+        use_ssf = True
+        print(f"[*] Mode: Adaptive. SSF Enabled. Pretrained weights required.")
+    else:
+        use_ssf = False
+        print(f"[*] Mode: Progressive. SSF Disabled (Identity).")
 
-# Parse SNR list
-if isinstance(args.multiple_snr, str): snr_list = [int(s) for s in args.multiple_snr.split(',')]
-else: snr_list = [int(args.multiple_snr)]
-
-# --- 2. Configuration Class ---
+# --- 3. Configuration Class ---
 class config():
     seed = 42
-    pass_channel = True
     CUDA = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    norm = False
-
-    # [Path Configuration]
-    # Default server paths
-    BASE_ROOT = "/data4/hongsik/E2E_SWIN"
     
-    # [Path Settings]
-    base_save_path = "/data4/hongsik/E2E_SWIN"
+    # [Path Configuration]
+    base_save_path = "/data4/hongsik/E2E_IST/results"
+    train_data_dir = "/data4/hongsik/data/DIV2K" 
+    test_data_dir = f"/data4/hongsik/data/{args.testset}"
+
     filename = datetime.now().strftime("%Y%m%d_%H%M%S")
-    workdir = f'{base_save_path}/history/{filename}'
+    workdir = f'{base_save_path}/{args.trainset}_{args.model_size}_SNR{args.train_snr}_{args.alpha_mode}_{args.progressive_mode}/{filename}'
     log = workdir + f'/Log_{filename}.log'
     samples = workdir + '/samples'
     models = workdir + '/models'
     logger = None
 
-    normalize = False
-    learning_rate = 0.0001
-    tot_epoch = 500
+    learning_rate = args.lr
+    tot_epoch = 10000
+    print_step = 100
+    save_model_freq = 5 # 5 epoch마다 검증
+    
+    batch_size = 8 * torch.cuda.device_count()
+    
+    # Model Config
+    common_kwargs = dict(
+        img_size = (256, 256), patch_size = 2, in_chans = 3, window_size = 8, mlp_ratio = 4., 
+        qkv_bias = True, qk_scale = None, norm_layer = nn.LayerNorm, patch_norm = True, model='E2E', use_ssf = use_ssf)
 
-    print_step = 50
-
-    # [Data Path Resolution]
-    # Use arguments if provided, else use default server paths
-    if args.trainset == 'CIFAR10':
-        save_model_freq = 1 # Validate every 5 epochs
-        image_dims = (3, 32, 32)
-        
-        train_data_dir = "/data4/hongsik/E2E_SWIN/data/CIFAR10/"
-        test_data_dir = "/data4/hongsik/E2E_SWIN/data/CIFAR10/"
-        
-        batch_size = 32 * torch.cuda.device_count()
-        downsample = 2 
-        
-        common_kwargs = dict(
-            img_size=(32, 32), 
-            patch_size=2, 
-            in_chans=3, 
-            window_size=2, 
-            mlp_ratio=4., 
-            qkv_bias=True, qk_scale=None, 
-            norm_layer=nn.LayerNorm, 
-            patch_norm=True,
-            model='E2E',  # 필수 인자 추가
-            C = None        # 필수 인자 추가 (Encoder 출력 채널 유지)
-        )
-        #encoder_kwargs = dict(embed_dims=[128, 256], depths=[2, 4], num_heads=[4, 8], **common_kwargs)
-        #decoder_kwargs = dict(embed_dims=[256, 128], depths=[4, 2], num_heads=[8, 4], **common_kwargs)    
-        encoder_kwargs = dict(embed_dims=[64, 128], depths=[2, 4], num_heads=[4, 8], **common_kwargs)
-        decoder_kwargs = dict(embed_dims=[128, 64], depths=[4, 2], num_heads=[8, 4], **common_kwargs)   
-    elif args.trainset == 'ImageNet':
-        save_model_freq = 5
-        image_dims = (3, 256, 256)
-
-        train_data_dir = "/data4/hongsik/data/ImageNet/train" 
-        test_data_dir = "/data4/hongsik/data/ImageNet/val"
-        
-        batch_size = 32 * torch.cuda.device_count() 
-        downsample = 4 
-        
-        common_kwargs = dict(
-            img_size=(256, 256), 
-            patch_size=2, 
-            in_chans=3, 
-            window_size=8, 
-            mlp_ratio=4., 
-            qkv_bias=True, 
-            qk_scale=None, 
-            norm_layer=nn.LayerNorm, 
-            patch_norm=True,
-            model='E2E',  # 필수 인자 추가
-            C = None      # 필수 인자 추가
-        )
-
-        if args.model_size == 'small':
-            encoder_kwargs = dict(embed_dims=[64, 128, 256, 320], depths=[2, 2, 2, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
-            decoder_kwargs = dict(embed_dims=[320, 256, 128, 64], depths=[2, 2, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
-        elif args.model_size == 'base':
-            encoder_kwargs = dict(embed_dims=[64, 128, 256, 320], depths=[2, 2, 6, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
-            decoder_kwargs = dict(embed_dims=[320, 256, 128, 64], depths=[2, 6, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
-        elif args.model_size == 'large':
-            encoder_kwargs = dict(embed_dims=[64, 128, 256, 320], depths=[2, 2, 18, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
-            decoder_kwargs = dict(embed_dims=[320, 256, 128, 64], depths=[2, 18, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
-
-# Loss Setup: Reconstruction metric is implicit (MSE), but MS-SSIM is useful for logging
-CalcuSSIM = MS_SSIM(window_size=3, data_range=1., levels=4, channel=3).cuda()
+    if args.model_size == 'small':
+        encoder_kwargs = dict(embed_dims=[128, 192, 256, 320], depths=[2, 2, 2, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
+        decoder_kwargs = dict(embed_dims=[320, 256, 192, 128], depths=[2, 2, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
+    elif args.model_size == 'base':
+        encoder_kwargs = dict(embed_dims=[128, 192, 256, 320], depths=[2, 2, 6, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
+        decoder_kwargs = dict(embed_dims=[320, 256, 192, 128], depths=[2, 6, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
+    elif args.model_size == 'large':
+        encoder_kwargs = dict(embed_dims=[128, 192, 256, 320], depths=[2, 2, 18, 2], num_heads=[4, 6, 8, 10], **common_kwargs)
+        decoder_kwargs = dict(embed_dims=[320, 256, 192, 128], depths=[2, 18, 2, 2], num_heads=[10, 8, 6, 4], **common_kwargs)
+    
 
 # Alpha Sequence
+# --- 4. Helper: Alpha Sequence Generator ---
 def get_alpha_sequence(L, mode='linear', device='cuda'):
     """
     Generate decaying alpha sequence with length L and sum 1.
-    Modes: 'linear', 'inverse', 'square', 'exponential', 'uniform'
+    Modes: 'base', 'linear', 'inverse', 'square', 'exponential', 'uniform'
     """
-    if mode == 'linear':
-        # [L, L-1, ..., 1]
-        v = torch.linspace(L, 1, steps=L)
-        
-    elif mode == 'inverse':
-        # [1, 1/2, 1/3, ...]
-        v = 1.0 / torch.arange(1, L + 1, dtype=torch.float32)
-        
-    elif mode == 'square':
-        # [1, 1/4, 1/9, ...]
-        v = 1.0 / (torch.arange(1, L + 1, dtype=torch.float32) ** 2)
-        
-    elif mode == 'exponential':
-        # [e^0, e^-1, e^-2, ...]
-        v = torch.exp(-torch.arange(0, L, dtype=torch.float32))
-        
-    elif mode == 'uniform':
-        # [1, 1, 1, ...] (기존 평균값 방식)
-        v = torch.ones(L, dtype=torch.float32)
-        
-    else:
-        raise ValueError(f"Unknown alpha mode: {mode}")
+    if mode == 'base': return torch.zeros(L, dtype=torch.float32, device=device)
+    elif mode == 'linear':      v = torch.linspace(L, 1, steps=L)
+    elif mode == 'inverse':     v = 1.0 / torch.arange(1, L + 1, dtype=torch.float32)
+    elif mode == 'square':      v = 1.0 / (torch.arange(1, L + 1, dtype=torch.float32) ** 2)
+    elif mode == 'exponential': v = torch.exp(-torch.arange(0, L, dtype=torch.float32))
+    elif mode == 'uniform':     v = torch.ones(L, dtype=torch.float32)
+    else: raise ValueError(f"Unknown alpha mode: {mode}")
+    return (v / v.sum()).to(device)
 
-    # Normalize to sum = 1
-    alpha = v / v.sum()
-    return alpha.to(device)
-
-# --- 3. Training Loop ---
-def train_one_epoch(args):
-    """
-    Train one epoch with Monte-Carlo Sampling (R) and Beta-Weighted Info.
-    Formula: Info = E[log p(y|z) - beta * ||x - x_hat||^2]
-             Info ~= -CrossEntropy - beta * MSE
-    """
-    global rho, lambda_l, prev_h_norm, global_step, optimizer_backbone, optimizer_const
+def load_weights(net, path, strict=False):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Model path not found: {path}")
+    state_dict = torch.load(path)
+    # DataParallel로 저장된 경우 'module.' 제거
+    new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     
+    # SSF parameter가 추가된 모델에 Base 모델을 로드할 때 strict=False 필요
+    missing, unexpected = net.load_state_dict(new_state_dict, strict=strict)
+    print(f"[*] Weights loaded from {path}")
+    print(f"    Missing Keys (Expected if Adaptive): {len(missing)}")
+    print(f"    Unexpected Keys: {len(unexpected)}")
+
+def freeze_parameters_for_adaptive(net, target='both'):
+    """
+    Rule 4: Freeze everything except SSF parameters.
+    Target: 'enc', 'dec', 'both'
+    """
+    # 1. 일단 전체 Freeze
+    for param in net.parameters():
+        param.requires_grad = False
+        
+    # 2. SSF Unfreeze
+    trainable_count = 0
+    for name, param in net.named_parameters():
+        is_ssf = 'ssf' in name
+
+        is_target = False
+        if target == 'both': is_target = True
+        elif target == 'enc' and 'encoder' in name: is_target = True
+        elif target == 'dec' and 'decoder' in name: is_target = True
+        
+        if is_ssf and is_target:
+            param.requires_grad = True
+            trainable_count += 1
+            
+    print(f"[*] Adaptive Mode: Freezed base model. {trainable_count} SSF parameters are trainable.")
+
+# --- 5. Training Loop ---
+def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
+    """
+    Train one epoch.
+    If progressive mode is on, computes Lagrangian loss and accumulates constraint violation 'h'.
+    Returns:
+        h_avg_norm (float): Norm of the average constraint violation for this epoch (used for Rho update).
+    """
     net.train()
     elapsed, losses = AverageMeter(), AverageMeter()
-    psnrs = AverageMeter()
-    ce_losses = AverageMeter()
-    mse_losses = AverageMeter()
-    info_meter = AverageMeter()
     
-    # Retrieve L (Total Steps) from Network
-    if isinstance(net, nn.DataParallel): L = net.module.L
-    else: L = net.L
-
-    # ALM usage flag
-    use_alm = bool(args.use_alm)
-        
-    # Initialize Dual Variables
-    if lambda_l is None: lambda_l = torch.zeros(L).cuda()
-
-    # Alpha sequence (only needed when ALM is enabled)
-    if use_alm:
-        alpha = get_alpha_sequence(L, mode=args.alpha_mode, device=config.device)
-    else:
-        alpha = None
-
-    # Reset Accumulators for Epoch-wise updates
-    optimizer_const.zero_grad()
-    h_accumulator = torch.zeros(L, device=config.device) if use_alm else None
+    # Configuration
+    L = config.encoder_kwargs['embed_dims'][-1]
+    
+    # Get Alpha
+    alpha = get_alpha_sequence(L, mode=args.alpha_mode, device=config.device)
+    
+    # Accumulator for h (constraint violations)
+    h_accumulator = torch.zeros(L, device=config.device)
     num_batches = 0
 
-    for batch_idx, (input_img, label) in enumerate(train_loader):
-        torch.cuda.empty_cache()
-
-        # Temperature control
-        total_steps = config.tot_epoch * len(train_loader) # 전체 학습 스텝 수
-        # DataParallel 사용 시 module로 접근
-        if isinstance(net, nn.DataParallel):
-            mapper = net.module.mapper
-        else:
-            mapper = net.mapper
-
-        progress = global_step / total_steps
-        new_temp = max(0.1, np.exp(-5 * progress))
-        mapper.temp = new_temp
-
+    for batch_idx, input_img in enumerate(train_loader):
         start_time = time.time()
-        global_step += 1
+        input_img = input_img.cuda()
         num_batches += 1
-        
-        input_img, label = input_img.cuda(), label.cuda()
-        current_snr = np.random.choice(snr_list)
 
-        # 1. Forward Pass
-        # results = {
-        #'mse': [loss_step_1, loss_step_2, ..., loss_step_L],       # 각 단계의 MSE Loss (Tensor)
-        #'ce':  [loss_step_1, loss_step_2, ..., loss_step_L],       # 각 단계의 CrossEntropy Loss (Tensor)
-        #'recon_img': [img_step_1, img_step_2, ..., img_step_L]     # 각 단계의 복원 이미지 (Tensor)
-        #}
-        results, _ = net(input_img, current_snr, label)
-        
-        if global_step % 100 == 0:
-            # 첫 번째 배치, 마지막 단계의 복원 이미지 가져오기
-            # results['recon_img']는 리스트 형태 [step1, step2, ... stepL]
-            recon_last = results['recon_img'][-1] # 가장 마지막 단계 복원 이미지
-            
-            # GPU Tensor -> CPU Numpy 변환 (첫 번째 샘플만)
-            input_np = input_img[0].permute(1, 2, 0).cpu().detach().numpy()
-            recon_np = recon_last[0].permute(1, 2, 0).cpu().detach().numpy()
-            
-            # Plotting
-            plt.figure(figsize=(10, 5))
-            
-            # (1) Original
-            plt.subplot(1, 2, 1)
-            plt.title(f"Step {global_step} Input")
-            plt.imshow(np.clip(input_np, 0, 1))
-            plt.axis('off')
-            
-            # (2) Reconstructed
-            plt.subplot(1, 2, 2)
-            plt.title(f"Step {global_step} Recon (SNR {current_snr}dB)")
-            plt.imshow(np.clip(recon_np, 0, 1))
-            plt.axis('off')
-            
-            # 저장
-            save_path = f"{config.samples}/step_{global_step}.png"
-            plt.savefig(save_path)
-            plt.close()
-            
-            if config.logger:
-                config.logger.info(f"Visualization saved at: {save_path}")
+        # 1. Forward Pass (Single SNR Training)
+        results = net(input_img, args.train_snr)
+        mse_list = [m.mean() for m in results['mse']] # List of Tensors (Length L)
 
-        # 2. Extract and Average Losses (for Multi-GPU)
-        mse_list = [m.mean() for m in results['mse']]
-        ce_list = [c.mean() for c in results['ce']]
-
-        # 3. ALM Constraints Calculation
-        # Info = -CrossEntropy - beta * MSE
-        # (Maximizing Info -> Minimizing -(Info))
-        # Note: CE is positive (NLL), so -CE is Log-Likelihood (negative).
-        # We want to MAXIMIZE (LogLikelihood - beta*MSE).
-        
-        info_vals = []
-        for c, m in zip(ce_list, mse_list):
-            info_val = -c - (args.beta * m) # Info formula
-            info_vals.append(info_val)
+        # 2. Loss Calculation
+        # [Rule 2] Base Mode (Overall MSE)
+        if args.progressive_mode == 'all':
+            loss_main = mse_list[-1]
+            total_loss = loss_main
+        else: # [Rule 3 & 4] Progressive/Adaptive (ALM)
+            loss_main = mse_list[-1] # Objective
+            denom = mse_list[0].detach() # Constraints
+            h_list = [torch.tensor(0., device=config.device)]
             
-        info_stack = torch.stack(info_vals) # (L,)
-        info_L = info_stack[-1]
-
-        # Info_L 로깅용
-        info_meter.update(info_L.item())
-        
-        # ALM constraints: only applied when use_alm == True
-        if use_alm:
-            denom = info_L.abs() + 1e-9
-            h_vec = []
-            for l in range(L):
-                curr_info = info_stack[l]
-                prev_info = info_stack[l-1] if l > 0 else torch.tensor(0.0, device=config.device)
-                h_val = ((curr_info - prev_info) / denom) - alpha[l]
-                h_vec.append(h_val)
-            h_stack = torch.stack(h_vec)
+            for l in range(1, L):
+                prev_mse = mse_list[l-1]
+                curr_mse = mse_list[l]
+                h_val = ((prev_mse - curr_mse) / denom) - alpha[l]
+                h_list.append(h_val)
+            
+            h_stack = torch.stack(h_list)
             h_accumulator += h_stack.detach()
-        else:
-            # ALM 끈 경우, h_stack은 0 (loss에 영향 X)
-            h_stack = torch.zeros(L, device=config.device)
-        
-        # 4. Total Loss Combination
-        loss_main = -info_L 
+            
+            lagrangian = torch.sum(lambda_l * h_stack) + (rho / 2) * torch.sum(h_stack ** 2)
+            total_loss = loss_main + lagrangian
 
-        if use_alm:
-            penalty = (rho / 2) * torch.sum(h_stack ** 2)
-            lagrange = torch.sum(lambda_l * h_stack)
-        else:
-            penalty = torch.tensor(0.0, device=config.device)
-            lagrange = torch.tensor(0.0, device=config.device)
-        
-        total_loss = loss_main + penalty + lagrange
-
-        # 5. Optimization (Backbone Only)
-        # Backbone is updated every batch.
-        # Constellation gradients are accumulated.
-        optimizer_backbone.zero_grad()
+        optimizer.zero_grad()
         total_loss.backward() 
-        optimizer_backbone.step() 
-        
+        optimizer.step()
+
         # Logging
         elapsed.update(time.time() - start_time)
         losses.update(total_loss.item())
-        ce_losses.update(ce_list[-1].item())
-        mse_losses.update(mse_list[-1].item())
-        
-        if mse_list[-1].item() > 0:
-            cur_psnr = 10 * np.log10(1 / mse_list[-1].item())
-            psnrs.update(cur_psnr)
 
-        if (global_step % config.print_step) == 0:
-            log = (f'Step {global_step} | Total {losses.val:.4f} | '
-                   f'CE {ce_losses.val:.4f} | MSE {mse_losses.val:.6f} | '
-                   f'INFO_L {info_meter.val:.4f} | PSNR {psnrs.val:.2f} | '
-                   f'Rho {rho:.2f} | Beta {args.beta} | Mode {args.alpha_mode} | '
-                   f'ALM {int(args.use_alm)}')
-            logger.info(log)
+    if (epoch % config.print_step) == 0:
+        logger.info(f'Epoch {epoch} [{batch_idx - 1}] | Loss {losses.val:.4f} | SNR {args.train_snr}')  
 
-    # --- End of Epoch Updates ---
-    # 1. Update Constellation (Using accumulated average gradients)
-    for param in optimizer_const.param_groups[0]['params']:
-        if param.grad is not None:
-            param.grad /= num_batches
-    optimizer_const.step()
+    return h_accumulator / num_batches
     
-    # 2. Update Dual Variables (Lambda) & Penalty (Rho)
-    if use_alm:
-        # Average constraint violation over the epoch
-        h_avg = h_accumulator / num_batches
-        h_norm = torch.norm(h_avg, p=2).item()
-
-        # Rule-A style update for rho
-        zeta = 0.9       # how much h must shrink to keep rho
-        rho_max = 100.0  # upper bound on rho
-
-        global prev_h_norm
-        with torch.no_grad():
-            # Standard ALM lambda update
-            lambda_l += rho * h_avg
-
-            # Initialize or update rho depending on constraint progress
-            if prev_h_norm is None:
-                prev_h_norm = h_norm
-            else:
-                if h_norm > zeta * prev_h_norm:
-                    rho = min(rho * gamma, rho_max)
-                prev_h_norm = h_norm
-
-        logger.info(f"Epoch End: Rho={rho:.2f}, ||h||={h_norm:.4e}, ALM=1")
-    else:
-        # ALM 끈 경우, 평균 성능만 찍어줌
-        logger.info(
-            f"Epoch End: ALM=0 | Info_L(avg)={info_meter.avg:.4f} | "
-            f"CE(avg)={ce_losses.avg:.4f} | MSE(avg)={mse_losses.avg:.6f}"
-        )
-
-# --- 4. Validation / Test Function ---
-def validate(loader):
-    config.isTrain = False
+# --- 6. Validation / Test Function ---
+def validate(loader, net, val_snr, epoch, config, save_freq=20):
     net.eval()
-    
-    psnrs = AverageMeter()
-    ce_losses = AverageMeter()
-    
-    results_psnr = np.zeros(len(snr_list))
-    results_ce = np.zeros(len(snr_list))
-    
-    for i, SNR in enumerate(snr_list):
-        with torch.no_grad():
-            for batch in loader:
-                if isinstance(batch, list) or isinstance(batch, tuple):
-                    input_img, label = batch[0], batch[1]
-                else:
-                    input_img = batch
-                    label = None
-                
-                input_img = input_img.cuda()
-                if label is not None: label = label.cuda()
-                
-                # Forward Pass
-                results, _ = net(input_img, SNR, label)
-                
-                # Metrics (Final Step)
-                final_mse = results['mse'][-1]
-                final_ce = results['ce'][-1]
-                
-                if final_mse.ndim > 0: final_mse = final_mse.mean()
-                if final_ce.ndim > 0: final_ce = final_ce.mean()
-                
-                # Reconstruction Metric
-                if final_mse.item() > 0:
-                    cur_psnr = 10 * np.log10(1 / final_mse.item())
-                    psnrs.update(cur_psnr)
-                
-                # Classification Metric
-                if label is not None:
-                    ce_losses.update(final_ce.item())
-        
-        results_psnr[i] = psnrs.avg
-        results_ce[i] = ce_losses.avg
-        psnrs.clear(); ce_losses.clear()
 
-    print(f"Validation PSNR: {results_psnr.tolist()}")
-    print(f"Validation CE Loss: {results_ce.tolist()}")
-    
-    # Return average PSNR for Early Stopping criterion
-    return np.mean(results_psnr)
+    if args.channel_type not in ['awgn', 'rayleigh']:
+        logger.info(f"====== Validation Results (Noiseless), Epoch {epoch + 1} ======")
+    else:
+        logger.info(f"====== Validation Results (SNR {val_snr} dB), Epoch {epoch + 1} ======")
 
-# --- 5. Main Execution Block ---
+    psnrs, ssims = AverageMeter(), AverageMeter()
+    ms_ssim_module = MS_SSIM(data_range=1., levels=4, channel=3).cuda()
+    
+    if not os.path.exists(config.samples):
+        os.makedirs(config.samples)
+
+    with torch.no_grad():
+        for i, input_img in enumerate(loader):
+            input_img = input_img.cuda()
+
+            results = net(input_img, val_snr)
+            # Progressive 구조인 경우 마지막 출력 사용
+            recon_img = results['recon_img'][-1]
+            final_mse = results['mse'][-1].mean()
+
+            # PSNR
+            if final_mse.item() > 0:
+                psnrs.update(10 * np.log10(1 / final_mse.item()))
+
+            # MS-SSIM
+            ssims.update(ms_ssim_module(recon_img, input_img).item())
+
+            # --- [Visualization Logic] ---
+            if i == 10 and ((epoch + 1) % save_freq == 0):
+                plt.figure(figsize=(6, 3)) 
+
+                # Original
+                orig = input_img[0].cpu().permute(1, 2, 0).numpy()
+                orig = np.clip(orig, 0, 1)
+
+                # Reconstructed
+                recon = recon_img[0].cpu().permute(1, 2, 0).numpy()
+                recon = np.clip(recon, 0, 1)
+
+                # 2. Original 따로 저장
+                # 파일명 예: val_epoch_50_original.png
+                save_path_orig = os.path.join(config.samples, f"val_epoch_{epoch + 1}_original.png")
+                plt.imsave(save_path_orig, orig)
+
+                # 3. Recon 따로 저장
+                # 파일명 예: val_epoch_50_recon_10dB.png
+                save_path_recon = os.path.join(config.samples, f"val_epoch_{epoch + 1}_recon_{val_snr}dB.png")
+                plt.imsave(save_path_recon, recon)
+            # ----------------------------------------
+
+    logger.info(f"Testset: {args.testset} | {val_snr} | PSNR: {psnrs.avg:.2f} dB | MS-SSIM: {ssims.avg:.4f}")
+    return psnrs.avg
+    
+# --- 7. Main Execution Block ---
 if __name__ == '__main__':
     seed_torch(config.seed)
     logger = logger_configuration(config, save_log=True)
-    logger.info("Initializing E2E SwinJSCC Framework...")
-    logger.info(config.__dict__)
+    logger.info("Initializing E2E-IST...")
     
     # 1. Model Initialization
     net = E2E_SwinJSCC(args, config).cuda()
     
+    # [Rule 3 & 4] Load Pretrained Weights Logic
+    if args.pretrained:
+        # Base -> Base Fine-tune / Base -> Adaptive
+        # strict = False allows loading Base weights into a model with SSF layers (missing keys)
+        load_weights(net, args.pretrained, strict=False)
+
+    # [Rule 4] Freeze logic for Adaptive Mode
+    if args.progressive_mode == 'adaptive':
+        freeze_parameters_for_adaptive(net, target = args.ssf_target)
+
     # Multi-GPU Setup
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs!")
         net = nn.DataParallel(net)
-        raw_net = net.module
-    else:
-        raw_net = net
 
     # 2. Optimizer Setup (Separated)
-    # Constellation Parameters
-    const_params = [raw_net.mapper.constellation_param]
-    const_param_ids = list(map(id, const_params))
-    
-    # Backbone Parameters
-    backbone_params = filter(lambda p: id(p) not in const_param_ids, net.parameters())
-    
-    optimizer_backbone = optim.Adam(backbone_params, lr=config.learning_rate)
-    optimizer_const = optim.Adam(const_params, lr=config.learning_rate) 
-
-    #scheduler = CosineAnnealingLR(optimizer_backbone, T_max=config.tot_epoch, eta_min=1e-6)
-    
-    # 3. Data Loaders
-    # Note: get_loader returns (train, test). We use 'test_loader' as validation during training.
+    # Optimizer (filter frozen params)
+    #optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=config.learning_rate)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), 
+                        lr=config.learning_rate, 
+                        weight_decay=1e-4)
+    #scheduler = CosineAnnealingLR(optimizer, T_max=config.tot_epoch, eta_min=1e-6)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=10, factor=0.5, min_lr=1e-7, verbose=True)
     train_loader, val_loader = get_loader(args, config)
-    global_step = 0
     
-    # Early Stopping Vars
+    # [ALM Parameters]
+    L = config.encoder_kwargs['embed_dims'][-1]
+    lambda_l = torch.zeros(L, device=config.device)
+    # [Rule A Parameters]
+    rho = 1.0 # 2. Rho Init
+    gamma = 2.0 #  Growth rate for rho
+    zeta = 0.9  # Improvement threshold
+    prev_h_norm = float('inf') # To store ||h_t||
     best_psnr = -1e9
     epochs_no_improve = 0
     
-    # 4. Training Loop
     if args.training:
         for epoch in range(config.tot_epoch):
-            logger.info(f"Start Epoch {epoch}")
-            train_one_epoch(args)
-            
+            h_avg = train_one_epoch(args, epoch, net, optimizer, lambda_l, rho)
             #scheduler.step()
-            #current_lr = scheduler.get_last_lr()[0]
-            #logger.info(f"Epoch {epoch} Done. Current LR: {current_lr:.6f}")
             
+            # [ALM Update] Only for Progressive/Adaptive
+            if args.progressive_mode != 'all':
+                lambda_l += rho * h_avg # Update Lambda: lambda_{t+1} = lambda_t + rho * h_{t+1}
+                curr_h_norm = torch.norm(h_avg).item()
+                if curr_h_norm > zeta * prev_h_norm:
+                    rho *= gamma
+                prev_h_norm = curr_h_norm
+            
+            if (epoch % config.print_step) == 0:
+                logger.info(f"Start Epoch {epoch} | Mode: {args.progressive_mode} | Alpha: {args.alpha_mode}")
+
             # Validation
             if (epoch + 1) % config.save_model_freq == 0:
-                logger.info("Running Validation...")
-                avg_psnr = validate(val_loader)
-                
-                # Save Best Model Logic
+                avg_psnr = validate(val_loader, net, args.train_snr, epoch, config, save_freq = 50)
+
+                scheduler.step(avg_psnr)
+
                 if avg_psnr > best_psnr:
                     best_psnr = avg_psnr
                     epochs_no_improve = 0
-                    save_path = config.models + f'/{config.filename}_best.model'
-                    
-                    # Unwrap DataParallel before saving
-                    state_dict = raw_net.state_dict()
-                    torch.save(state_dict, save_path)
-                    logger.info(f"New Best Model Saved! Avg PSNR: {best_psnr:.4f}")
+                    save_name = f'best_model_{args.alpha_mode}.pth'
+                    save_path = os.path.join(config.models, save_name)
+                    if isinstance(net, nn.DataParallel):
+                        torch.save(net.module.state_dict(), save_path)
+                    else:
+                        torch.save(net.state_dict(), save_path)
+                    logger.info(f"Best Model Saved! PSNR: {best_psnr:.4f}")
                 else:
                     epochs_no_improve += config.save_model_freq
-                    logger.info(f"No improvement. Counter: {epochs_no_improve}/{args.patience}")
                 
-                # Early Stopping
                 if epochs_no_improve >= args.patience:
-                    logger.info("Early Stopping Triggered. Training Finished.")
+                    logger.info("Early Stopping.")
                     break
     else:
         logger.info("Running Test Mode...")
-        validate(val_loader)
-
-# python main.py --training --trainset CIFAR10 --C 16 --M 16 --multiple-snr 10
+        print(f"--- Testing Target SNR ({args.train_snr}) ---")
+        validate(val_loader, net, args.train_snr, 0, config)
