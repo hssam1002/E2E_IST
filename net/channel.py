@@ -39,27 +39,35 @@ class Channel(nn.Module):
         return out, pwr
 
     def forward(self, input, chan_param, avg_pwr=False):
-        channel_tx = input
-        input_shape = channel_tx.shape
-        channel_in = channel_tx.reshape(-1)
-        L = channel_in.shape[0]
 
-        channel_in = channel_in[:L // 2] + channel_in[L // 2:] * 1j
+        original_shape = input.shape # (B, Seq, C)
+        B = original_shape[0]
 
+        # 3. (B, Seq, C) -> (B, Seq * C)
+        channel_in = input.reshape(B, -1)
+        num_features = channel_in.shape[1]
+
+        # 3. Complex Conversion (Half Split)
+        half_len = num_features // 2
+
+        x_real = channel_in[:, :half_len]
+        x_imag = channel_in[:, half_len:]
+
+        channel_complex = x_real + 1j * x_imag
         # Channel Effect
         if self.chan_type == 'awgn':
             sigma = np.sqrt(1.0 / (2 * 10 ** (chan_param / 10)))
-            channel_output = self.gaussian_noise_layer(channel_in, std=sigma)
+            channel_output = self.gaussian_noise_layer(channel_complex, std=sigma)
             
         elif self.chan_type == 'rayleigh':
             sigma = np.sqrt(1.0 / (2 * 10 ** (chan_param / 10)))
-            channel_output = self.rayleigh_noise_layer(channel_in, std=sigma)
+            channel_output = self.rayleigh_noise_layer(channel_complex, std=sigma)
         else: # none
-            channel_output = channel_in
+            channel_output = channel_complex
 
         # Real Valued reconversion
-        channel_output = torch.cat([torch.real(channel_output), torch.imag(channel_output)])
-        channel_output = channel_output.reshape(input_shape)
+        channel_output = torch.cat([torch.real(channel_output), torch.imag(channel_output)], dim = 1)
+        channel_output = channel_output.reshape(original_shape)
         
         return channel_output
 

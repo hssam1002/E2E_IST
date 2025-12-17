@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from datetime import datetime
 from net.encoder import SwinTransformerBlock # BasicLayer 등은 encoder에서 가져오거나 여기에 정의
+import torch.utils.checkpoint as checkpoint
 
 # --------------------------------------------------------
 # 1. Basic Layer (Decoder용 - Upsample 포함)
@@ -10,12 +11,13 @@ from net.encoder import SwinTransformerBlock # BasicLayer 등은 encoder에서 �
 class BasicLayer(nn.Module):
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None,
-                 norm_layer=nn.LayerNorm, upsample=None, use_ssf=True):
+                 norm_layer=nn.LayerNorm, upsample=None, use_ssf=True, use_checkpoint=False):
 
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
         self.depth = depth
+        self.use_checkpoint = use_checkpoint
 
         # build blocks
         self.blocks = nn.ModuleList([
@@ -36,7 +38,10 @@ class BasicLayer(nn.Module):
 
     def forward(self, x):
         for blk in self.blocks:
-            x = blk(x)
+            if self.use_checkpoint:
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
+            else:
+                x = blk(x)
         if self.upsample is not None:
             x = self.upsample(x)
         return x
@@ -77,7 +82,8 @@ class SwinJSCC_Decoder(nn.Module):
                  model=None,     # Model type identifier (e.g., 'E2E')
                  patch_size=2,   # Patch size for initial embedding (kept for kwargs compatibility)
                  in_chans=3,     # Number of output channels for the reconstructed image (usually 3 for RGB)
-                 use_ssf = True,# Use of SSF or not
+                 use_ssf = True, # Use of SSF or not
+                 use_checkpoint = False,
                  **kwargs
                  ):
         super().__init__()
@@ -88,6 +94,7 @@ class SwinJSCC_Decoder(nn.Module):
         self.W = img_size[1]
         self.patches_resolution = (img_size[0] // 2 ** len(depths), img_size[1] // 2 ** len(depths))
         self.use_ssf = use_ssf
+        self.use_checkpoint = use_checkpoint
 
         # 1. Reconstruction Layers
         self.layers = nn.ModuleList()
@@ -103,7 +110,8 @@ class SwinJSCC_Decoder(nn.Module):
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                upsample=PatchReverseMerging,
-                               use_ssf=self.use_ssf) 
+                               use_ssf = self.use_ssf,
+                               use_checkpoint = self.use_checkpoint) 
             self.layers.append(layer)
             print("Decoder ", layer.extra_repr())
 

@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint as checkpoint
+
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from net.modules import *
 
@@ -193,12 +195,13 @@ class SwinTransformerBlock(nn.Module):
 class BasicLayer(nn.Module):
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, norm_layer=nn.LayerNorm,
-                 downsample=None, use_ssf=False):
+                 downsample=None, use_ssf=False, use_checkpoint = False):
 
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
         self.depth = depth
+        self.use_checkpoint = use_checkpoint
 
         # Block 생성 시 use_ssf 전달
         self.blocks = nn.ModuleList([
@@ -222,7 +225,12 @@ class BasicLayer(nn.Module):
         if self.downsample is not None:
             x = self.downsample(x)
         for _, blk in enumerate(self.blocks):
-            x = blk(x)
+            if self.use_checkpoint:
+                # [핵심] 그냥 blk(x) 하는 대신, checkpoint가 감싸서 실행하게 함
+                # 이렇게 하면 중간 계산값을 저장 안 하고, 역전파 때 다시 계산해서 메모리를 아깸
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
+            else:
+                x = blk(x)
         return x
 
     def extra_repr(self) -> str:
@@ -259,6 +267,7 @@ class SwinJSCC_Encoder(nn.Module):
                  patch_size=2,   # Patch size for initial embedding (kept for kwargs compatibility)
                  in_chans=3,     # Number of output channels for the reconstructed image (usually 3 for RGB)
                  use_ssf = False,# Use of SSF or not
+                 use_checkpoint=False,
                  **kwargs):
         super().__init__()
         self.num_layers = len(depths)
@@ -272,6 +281,7 @@ class SwinJSCC_Encoder(nn.Module):
         self.W = img_size[1] // (2 ** self.num_layers)
         self.patch_embed = PatchEmbed(img_size, 2, 3, embed_dims[0])
         self.use_ssf = use_ssf
+        self.use_checkpoint = use_checkpoint
         
         # build layers
         self.layers = nn.ModuleList()
@@ -287,7 +297,8 @@ class SwinJSCC_Encoder(nn.Module):
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                downsample=PatchMerging if i_layer != 0 else None,
-                               use_ssf = self.use_ssf)
+                               use_ssf = self.use_ssf,
+                               use_checkpoint = self.use_checkpoint)
             print("Encoder ", layer.extra_repr())
             self.layers.append(layer)
             

@@ -55,7 +55,7 @@ class E2E_SwinJSCC(nn.Module):
         self.save_end = getattr(args, 'save_end', self.total_channels)
 
         # Progressive Steps
-        self.packet_size = 1
+        self.packet_size = args.packet_size
 
         # Resolution Info
         self.H = self.W = 0
@@ -68,6 +68,7 @@ class E2E_SwinJSCC(nn.Module):
         # x: (B, Seq, C) or (B, Seq, 1)
         # Feature-wise 동작을 위해 dim=1 (Sequence)에 대해서만 평균을 구합니다.
         # 결과적으로 각 Channel(dim=2) 별로 독립적인 Power Normalization이 수행됩니다.
+        #power = torch.mean(x ** 2, dim = 1, keepdim=True)
         power = torch.mean(x ** 2, dim = 1, keepdim=True)
         x_norm = x / torch.sqrt(power)
         return x_norm
@@ -96,10 +97,7 @@ class E2E_SwinJSCC(nn.Module):
             tx_norm = self.power_normalize(feat_all)
             
             # b) Channel
-            # (B, Seq, C) -> Flatten -> Channel -> Reshape
-            tx_flat = tx_norm.reshape(B, -1)
-            rx_flat = self.channel(tx_flat, snr, avg_pwr=True)
-            rx_all = rx_flat.reshape(B, Seq, -1)
+            rx_all = self.channel(tx_norm, snr, avg_pwr = True)
             
             # c) Decoding
             recon = self.decoder(rx_all)
@@ -133,16 +131,21 @@ class E2E_SwinJSCC(nn.Module):
                 tx_norm = self.power_normalize(tx_chunk)
                 
                 # c) Channel
-                tx_flat = tx_norm.reshape(B, -1)
-                rx_flat = self.channel(tx_flat, snr, avg_pwr=True)
-                rx_chunk = rx_flat.reshape(B, Seq, -1)
+                rx_chunk = self.channel(tx_norm, snr, avg_pwr=True)
                 
                 # d) Buffer Update
+                feat_received_buffer = feat_received_buffer.clone()
                 feat_received_buffer[:, :, c_start:c_end] = rx_chunk
                 
                 # e) Decoding
                 recon = self.decoder(feat_received_buffer)
-                if self.save_start <= c_end <= self.save_end:
+
+                is_in_range = (self.save_start <= c_end <= self.save_end)
+                is_testing = (not self.training)
+                is_last_step = (c_end >= C_total)  # 마지막 전송 단계인지 확인
+
+                # 위 셋 중 하나라도 해당되면 리스트에 넣습니다.
+                if is_in_range or is_testing or is_last_step:
                     recon_imgs.append(recon)
                 
                 # f) Loss
