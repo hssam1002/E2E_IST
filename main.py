@@ -39,8 +39,8 @@ parser.add_argument('--alpha_mode', type=str, default='base',
                     choices=['base', 'linear', 'inverse', 'square', 'exponential', 'uniform'],
                     help="'base' = Non-progressive (All-at-once). Others = Progressive weights.")
 parser.add_argument('--progressive_mode', type=str, default='progressive', 
-                    choices=['progressive', 'adaptive'],
-                    help="Only valid if alpha_mode != 'base'. 'adaptive' uses SSF.")
+                    choices=['progressive', 'adaptive', 'mrl', 'rand_mask_1', 'rand_mask_2'],
+                    help="progressive/adaptive: ALM based, mrl: Sum all, rand_mask_*: Random drop")
 parser.add_argument('--packet_size', type=int, default=24, help='Number of features per transmission step (F).')
 
 # [Adaptive / SSF Settings]
@@ -66,8 +66,9 @@ else:
         use_ssf = True
         print(f"[*] Mode: Adaptive. SSF Enabled. Pretrained weights required.")
     else:
+        # mrl, dc_ae_1, dc_ae_2, progressive 모두 기본 모델(SSF Off) 사용
         use_ssf = False
-        print(f"[*] Mode: Progressive. SSF Disabled (Identity).")
+        print(f"[*] Mode: {args.progressive_mode}. SSF Disabled (Identity).")
 
 # --- 3. Configuration Class ---
 class config():
@@ -89,8 +90,8 @@ class config():
 
     learning_rate = args.lr
     tot_epoch = 10000
-    print_step = 1
-    save_model_freq = 5 # 5 epoch마다 검증
+    print_step = 100
+    save_model_freq = 20 # 5 epoch마다 검증
     
     batch_size = 8 * torch.cuda.device_count()
     
@@ -169,17 +170,17 @@ def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
         h_avg_norm (float): Norm of the average constraint violation for this epoch (used for Rho update).
     """
     net.train()
-    elapsed, losses = AverageMeter(), AverageMeter()
+    elapsed = AverageMeter()
+    losses = AverageMeter()      # Total Loss
+    mse_losses = AverageMeter()  # MSE (Reconstruction)
+    h_losses = AverageMeter()    # H-term (Constraint Penalty)
     
     C_total = config.encoder_kwargs['embed_dims'][-1]
     F = args.packet_size
-    # Configuration
     L = (C_total + F - 1) // F
     
-    # Get Alpha
+    # For Alpha (ALM based)
     alpha = get_alpha_sequence(L, mode=args.alpha_mode, device=config.device)
-    
-    # Accumulator for h (constraint violations)
     h_accumulator = torch.zeros(L, device=config.device)
     num_batches = 0
 
@@ -192,11 +193,20 @@ def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
         results = net(input_img, args.train_snr)
         mse_list = [m.mean() for m in results['mse']] # List of Tensors (Length L)
 
+        # 마지막 단계(Full transmission)의 MSE (로깅용)
+        final_recon_loss = mse_list[-1]
+        loss_h_term = torch.tensor(0.0).cuda()
+
         # 2. Loss Calculation
         # [Rule 2] Base Mode (Overall MSE)
         if args.progressive_mode == 'all':
-            loss_main = mse_list[-1]
-            total_loss = loss_main
+            total_loss = final_recon_loss
+        elif args.progressive_mode == 'mrl': 
+            total_loss = torch.sum(torch.stack(mse_list)) 
+        elif args.progressive_mode == 'rand_mask_1':
+            total_loss = mse_list[0]
+        elif args.progressive_mode == 'rand_mask_2':
+            total_loss = mse_list[0] + mse_list[1]
         else: # [Rule 3 & 4] Progressive/Adaptive (ALM)
             loss_main = mse_list[-1] # Objective
 
@@ -206,11 +216,8 @@ def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
             h_list = []
             
             for l in range(1, L + 1):
-                # d_S(l - 1)
                 prev_mse = all_distortions[l-1]
-                # d_S(l)
                 curr_mse = all_distortions[l]
-
                 reduction_ratio = (prev_mse - curr_mse) / d_s_0
                 h_val = alpha[l-1] - reduction_ratio
                 h_list.append(h_val)
@@ -230,20 +237,21 @@ def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
         # Logging
         elapsed.update(time.time() - start_time)
         losses.update(total_loss.item())
+        mse_losses.update(final_recon_loss.item())       # MSE 기록
+        h_losses.update(loss_h_term.item()) # <-- 초기화된 변수(0.0) 혹은 계산된 값 사용
             
     if (epoch % config.print_step) == 0:
         current_lr = optimizer.param_groups[0]['lr']
-
         avg_lam = lambda_l.mean().item()
-        max_lam = lambda_l.max().item()
-        
         logger.info(
-                f'Epoch {epoch} [{batch_idx}] | '
-                f'Loss {losses.val:.4f} | '
+                f'Epoch {epoch} | '
+                f'Total {losses.avg:.6f} | '     # Total Loss (모드에 따라 다름)
+                f'MSE {mse_losses.avg:.6f} | '   # Reconstruction Loss (마지막 단계 기준)
+                f'H-term {h_losses.avg:.8f} | '  # Constraint Loss (ALM 외엔 0)
                 f'SNR {args.train_snr} | '
-                f'LR {current_lr:.2e} | '
-                f'Rho {rho:.1f} | '          # 현재 Penalty Weight
-                f'Lam(Avg) {avg_lam:.2e}'    # Lambda 평균 (지수표기)
+                f'Rho {rho:.2e} | '              
+                f'Lam {avg_lam:.2e} | '
+                f'LR {current_lr:.2e}'
             )
 
     return h_accumulator / num_batches
@@ -251,6 +259,13 @@ def train_one_epoch(args, epoch, net, optimizer, lambda_l, rho):
 # --- 6. Validation / Test Function ---
 def validate(loader, net, val_snr, epoch, config, save_freq=20):
     net.eval()
+
+    original_mode = net.module.args.progressive_mode if isinstance(net, nn.DataParallel) else net.args.progressive_mode
+
+    if isinstance(net, nn.DataParallel):
+        net.module.args.progressive_mode = 'all'
+    else:
+        net.args.progressive_mode = 'all'
 
     if args.channel_type not in ['awgn', 'rayleigh']:
         logger.info(f"====== Validation Results (Noiseless), Epoch {epoch + 1} ======")
@@ -302,6 +317,11 @@ def validate(loader, net, val_snr, epoch, config, save_freq=20):
                 plt.imsave(save_path_recon, recon)
             # ----------------------------------------
 
+    if isinstance(net, nn.DataParallel):
+        net.module.args.progressive_mode = original_mode
+    else:
+        net.args.progressive_mode = original_mode
+        
     logger.info(f"Testset: {args.testset} | {val_snr} | PSNR: {psnrs.avg:.2f} dB | MS-SSIM: {ssims.avg:.4f}")
     return psnrs.avg
     
@@ -346,9 +366,10 @@ if __name__ == '__main__':
     lambda_l = torch.zeros(L_steps, device=config.device)
     
     # [Rule A Parameters]
-    rho = 1.0 # 2. Rho Init
-    gamma = 1.2 #  Growth rate for rho
-    zeta = 1.0  # Improvement threshold
+    rho = 0.001 # 2. Rho Init
+    gamma = 1.025 #  Growth rate for rho
+    max_rho = 1.0
+    zeta = 0.8  # Improvement threshold
     prev_h_norm = float('inf') # To store ||h_t||
     curr_h_norm = 0.0
     best_psnr = -1e9
@@ -365,12 +386,13 @@ if __name__ == '__main__':
                 
                 curr_h_norm = torch.norm(h_avg).item()
                 if curr_h_norm > zeta * prev_h_norm:
-                    rho *= gamma
+                    rho = min(max_rho, rho * gamma)
                 prev_h_norm = curr_h_norm
                 
             if (epoch % config.print_step) == 0:
                 logger.info(f"Start Epoch {epoch} | Mode: {args.progressive_mode} | Alpha: {args.alpha_mode}")
-                logger.info(f"   >> [ALM Update] Rho: {rho:.1f} | Lambda Avg: {lambda_l.mean().item():.2e} | H Norm: {curr_h_norm:.4f}")
+                if args.progressive_mode in ['progressive', 'adaptive']:
+                    logger.info(f"   >> [ALM Update] Rho: {rho:.4f} | Lambda Avg: {lambda_l.mean().item():.2e} | H Norm: {curr_h_norm:.4f}")
 
             # Validation
             if (epoch + 1) % config.save_model_freq == 0:

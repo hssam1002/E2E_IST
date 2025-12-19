@@ -88,34 +88,61 @@ class E2E_SwinJSCC(nn.Module):
         feat_all = self.encoder(input_image)
         B, Seq, C_total = feat_all.shape
 
+        total_packets = (C_total + self.packet_size - 1) // self.packet_size
+        random_idx = np.random.randint(0, total_packets) # For Rand_mask
+        
+        # [Global Normalization & Channel]
+        tx_norm = self.power_normalize(feat_all)
+        rx_all = self.channel(tx_norm, snr, avg_pwr = True)
+
+        c_end = (random_idx + 1) * self.packet_size
+        c_end = min(c_end, C_total)
+        
         # =========================================================
-        # [Fast Path] Mode: 'all' (Base Model Training)
-        # 루프 없이 한 번에 보내고 복원합니다.
+        # [Fast Path] Mode: 'all' (Base Model)
         # =========================================================
         if self.args.progressive_mode == 'all':
-            # a) Power Normalization (전체)
-            tx_norm = self.power_normalize(feat_all)
-            
-            # b) Channel
-            rx_all = self.channel(tx_norm, snr, avg_pwr = True)
-            
-            # c) Decoding
             recon = self.decoder(rx_all)
+            mse_val = nn.MSELoss()(recon, input_image)
+            return {'mse': [mse_val], 'recon_img': [recon]}
+        # =========================================================
+        # [Optimized Path] Mode: 'rand_mask_1'
+        # =========================================================
+        elif self.args.progressive_mode == 'rand_mask_1':
+            # Masking (뒷부분 0으로 채움)
+            feat_received_buffer = torch.zeros_like(rx_all)
+            feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
             
-            # d) Result Formatting
+            # Decoding & Loss
+            recon = self.decoder(feat_received_buffer)
             mse_val = nn.MSELoss()(recon, input_image)
             
-            return {
-                'mse': [mse_val],
-                'recon_img': [recon]
-            }
+            return {'mse': [mse_val], 'recon_img': [recon]}
         # =========================================================
-        # [Slow Path] Mode: 'progressive' or 'adaptive'
-        # Feature를 하나씩 보내며 누적 복원합니다.
+        # [Optimized Path] Mode: 'rand_mask_2'
+        # Full 디코딩 1회 + Partial 마스킹 후 디코딩 1회
+        # =========================================================
+        elif self.args.progressive_mode == 'rand_mask_2':
+            # 1. Full Path
+            recon_full = self.decoder(rx_all)
+            mse_full = nn.MSELoss()(recon_full, input_image)
+
+            # 2. Partial Path (rx_all 재사용)
+            feat_received_buffer = torch.zeros_like(rx_all)
+            feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
+            
+            recon_partial = self.decoder(feat_received_buffer)
+            mse_partial = nn.MSELoss()(recon_partial, input_image)
+
+            # [Partial, Full] 순서로 리턴
+            return {'mse': [mse_partial, mse_full], 'recon_img': [recon_partial, recon_full]}
+
+        # =========================================================
+        # [Slow Path] Mode: 'progressive', 'adaptive', 'mrl'
+        # 기존 Loop 방식 유지 (중간 단계 MSE가 모두 필요하거나, ALM 제어 필요 시)
         # =========================================================
         else:
             feat_received_buffer = torch.zeros_like(feat_all)
-            
             mse_losses = []
             recon_imgs = []
 
@@ -124,33 +151,24 @@ class E2E_SwinJSCC(nn.Module):
                 c_start = c_idx
                 c_end = c_idx + self.packet_size
                 
-                # a) Packet Extraction
-                tx_chunk = feat_all[:, :, c_start:c_end]
-                
-                # b) Power Normalization
-                tx_norm = self.power_normalize(tx_chunk)
-                
-                # c) Channel
-                rx_chunk = self.channel(tx_norm, snr, avg_pwr=True)
-                
                 # d) Buffer Update
                 feat_received_buffer = feat_received_buffer.clone()
-                feat_received_buffer[:, :, c_start:c_end] = rx_chunk
+                feat_received_buffer[:, :, c_start:c_end] = rx_all[:, :, c_start:c_end]
                 
                 # e) Decoding
                 recon = self.decoder(feat_received_buffer)
 
-                is_in_range = (self.save_start <= c_end <= self.save_end)
-                is_testing = (not self.training)
-                is_last_step = (c_end >= C_total)  # 마지막 전송 단계인지 확인
-
-                # 위 셋 중 하나라도 해당되면 리스트에 넣습니다.
-                if is_in_range or is_testing or is_last_step:
-                    recon_imgs.append(recon)
-                
                 # f) Loss
                 mse_val = nn.MSELoss()(recon, input_image)
                 mse_losses.append(mse_val)
+
+                # Save Condition
+                is_in_range = (self.save_start <= c_end <= self.save_end)
+                is_testing = (not self.training)
+                is_last_step = (c_end >= C_total)
+
+                if is_in_range or is_testing or is_last_step:
+                    recon_imgs.append(recon)
 
             return {
                 'mse': mse_losses,           
