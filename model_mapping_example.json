@@ -1,0 +1,19 @@
+{
+  "_comment": "모델 경로 매핑 예제 파일",
+  "_usage": "각 progressive_mode에 대한 모델 경로를 매핑합니다.",
+  "_note": "이 파일을 복사해서 실제 경로로 수정한 후 --model_mapping 옵션에 사용하세요.",
+  
+  "alm": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_exponential_alm/20240101_120000/models/best_model_exponential.pth",
+  "adaptive-alm": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_linear_adaptive-alm/20240101_130000/models/best_model_linear.pth",
+  "adaptive-mrl": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_base_adaptive-mrl/20240101_140000/models/best_model_base.pth",
+  "mrl": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_base_mrl/20240101_140000/models/best_model_base.pth",
+  "rand_mask_1": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_base_rand_mask_1/20240101_150000/models/best_model_base.pth",
+  "rand_mask_2": "/data4/hongsik/E2E_IST/results/DIV2K_SNR10_base_rand_mask_2/20240101_160000/models/best_model_base.pth",
+  
+  "_alternative_format": "alpha_mode를 포함한 형식도 사용 가능합니다:",
+  "alm_exponential": "/path/to/alm_exponential_model.pth",
+  "alm_linear": "/path/to/alm_linear_model.pth",
+  "adaptive-alm_linear": "/path/to/adaptive-alm_linear_model.pth",
+  "adaptive-mrl_base": "/path/to/adaptive-mrl_base_model.pth",
+  "mrl_base": "/path/to/mrl_base_model.pth"
+}

@@ -1,75 +1,201 @@
-# SwinJSCC: Taming Swin Transformer for Joint Source-Channel Coding
+# E2E-IST: End-to-End Image Semantic Transmission
 
-Official Pytorch implementation for "[SwinJSCC: Taming Swin Transformer for Deep Joint Source-Channel Coding](https://arxiv.org/abs/2308.09361)".
+End-to-End Progressive Image Transmission using Swin Transformer-based Joint Source-Channel Coding (JSCC) with Augmented Lagrangian Method (ALM).
 
 ## Introduction
 
-In this paper, we establish a new neural JSCC backbone that can also adapt flexibly to diverse channel conditions and transmission rates within a single model, our open-source project aims to promote the research in this field. Specifically, we show that with elaborate design, neural JSCC codec built on the emerging Swin Transformer backbone achieves superior performance than conventional neural JSCC codecs built upon CNN, while also requiring lower end-to-end processing latency. Paired with two spatial modulation modules that scale latent representations based on the channel state information and target transmission rate, our baseline SwinJSCC can further upgrade to a versatile version, which increases its capability to adapt to diverse channel conditions and rate configurations. Extensive experimental results show that our SwinJSCC achieves better or comparable performance versus the state-of-the-art engineered BPG + 5G LDPC coded transmission system with much faster end-to-end coding speed, especially for high-resolution images, in which case traditional CNN-based JSCC yet falls behind due to its limited model capacity. 
+This project implements a progressive image transmission system that sends image features in chunks, allowing incremental reconstruction at the receiver. The system uses:
+
+- **Swin Transformer** as the backbone for JSCC encoder/decoder
+- **Augmented Lagrangian Method (ALM)** for progressive transmission control
+- **Adaptive fine-tuning** with Scale & Shift Features (SSF)
+- **Multiple progressive strategies** for different use cases
+
+## Project Structure
+
+```
+E2E_IST/
+├── main.py              # Main entry point
+├── config.py            # Configuration and argument parsing
+├── model_utils.py       # Model utilities (loading, setup, etc.)
+├── train.py             # Training functions
+├── test.py              # Test and validation functions
+├── utils_plot.py        # Plotting and result saving utilities
+├── utils.py             # General utilities
+├── net/
+│   ├── network.py       # E2E_SwinJSCC network
+│   ├── encoder.py       # Swin Transformer encoder
+│   ├── decoder.py       # Swin Transformer decoder
+│   ├── channel.py       # Channel model (AWGN, Rayleigh, etc.)
+│   └── modules.py       # Swin Transformer modules
+├── loss/
+│   └── distortion.py    # Loss functions (MS-SSIM, etc.)
+└── data/
+    └── datasets.py      # Data loaders
+```
+
+## Progressive Modes
+
+The system supports multiple progressive transmission strategies:
+
+- **`off`**: Non-progressive mode (all features transmitted at once)
+- **`alm`**: ALM-based progressive transmission with constraint control
+- **`adaptive-alm`**: SSF + ALM for adaptive fine-tuning
+- **`adaptive-mrl`**: SSF + Mean Rate-Distortion Loss
+- **`mrl`**: Mean Rate-Distortion Loss (sum of all step losses)
+- **`rand_mask_1`**: Random masking (single random chunk)
+- **`rand_mask_2`**: Random masking (partial + full)
 
 ## Installation
-We implement SwinJSCC under Python 3.8 and PyTorch 1.9.
 
-Note: We found that when using w/ SA & RA for inference in a torch > 1.12 environment, the results are inconsistent with those reported in the paper. Therefore, it is recommended to use the same version of PyTorch as the training environment (torch <= 1.12) for inference.
-
+Requirements:
+- Python 3.8+
+- PyTorch 1.9+ (recommended <= 1.12 for consistency)
+- Other dependencies: numpy, matplotlib, pandas
 
 ## Usage
 
-All pretrained models are in [Google Drive](https://drive.google.com/drive/folders/1_EouRY4yYvMCtamX2ReBzEd5YBQbyesc?usp=sharing).
+### Training
 
-* cbr = C/(2^(2i)*3*2), i denotes the downsample number. For CIFAR10, i=2; for HR_image, i=4.
-* SwinJSCC_w/o_SAandRA model is the SwinJSCC model without Channel ModNet module and Rate ModNet which is trained on a fixed SNR  and rate. SwinJSCC_w/_SA model is the SwinJSCC model with Channel ModNet module which is trained on various SNRs and a fixed rate. SwinJSCC_w/_RA model is the SwinJSCC model with Rate ModNet module which is trained on various rates and a fixed SNR. SwinJSCC_w/_SAandRA model is the SwinJSCC model with Rate ModNet module and Channel ModNet module which is trained on various rates and SNRs.
-* 'multiple-snr' decides use either fixed or random SNR to train the model. For models which without Channel ModNet module, 'multiple-snr' is set as a fixed SNR. For models which with Channel ModNet module, 'muliple-snr' can be set as both fixed or random SNRs.
-* 'C' decides use either fixed or random rate to train the model. For models which without Rate ModNet module, 'C' is set as a fixed rate. For models which with Rate ModNet module, 'C' can be set as both fixed or random rates.
-* 'model_size' decides model params size, we set three model sizes, e.g. small, base, large.
-* for high-resolution images, we can firstly train the SwinJSCC_W/O model. Then, the SwinJSCC_W/O model is used as a pre-training model to train the whole SwinJSCC model.
-* You can apply our method on your own images.
-```
-python main.py --training --trainset {CIFAR10/DIV2K} --testset {CIFAR10/kodak/CLIC21} -- distortion-metric {MSE/MS-SSIM} --model {'SwinJSCC_w/o_SAandRA'/'SwinJSCC_w/_SA'/'SwinJSCC_w/_RA'/'SwinJSCC_w/_SAandRA'} --channel-type {awgn/rayleigh} --C {bottleneck dimension} --multiple-snr {random or fixed snr} --model_size {SwinJSCC model size}
-```
+Train a model with specified progressive mode and hyperparameters:
 
-### For SwinJSCC_w/o_SAandRA model 
-
-*e.g. cbr = 0.0625, snr = 10, metric = PSNR, channel = AWGN
-
-```
-e.g.
-python main.py --trainset DIV2K --testset kodak -- distortion-metric MSE --model SwinJSCC_w/o_SAandRA model --channel-type awgn --C 96 -- multiple-snr 10 --model_size base
+```bash
+python main.py \
+    --training \
+    --trainset DIV2K \
+    --testset Kodak \
+    --channel_type awgn \
+    --train_snr 10 \
+    --progressive_mode alm \
+    --alpha_mode exponential \
+    --packet_size 32 \
+    --lr 1e-4
 ```
 
-You can apply our method on your own images.
+**Key arguments:**
+- `--training`: Enable training mode
+- `--trainset`: Training dataset (default: DIV2K)
+- `--testset`: Test dataset (Kodak, CLIC2021, DIV2K)
+- `--channel_type`: Channel model (awgn, rayleigh, noiseless)
+- `--train_snr`: Training SNR in dB (default: 10)
+- `--progressive_mode`: Progressive strategy (see above)
+- `--alpha_mode`: Alpha weight sequence mode (linear, inverse, square, exponential, uniform)
+- `--packet_size`: Number of features per transmission step (default: 32)
+- `--lr`: Learning rate (default: 1e-4)
+- `--pretrained`: Path to pretrained model for fine-tuning
+- `--patience`: Early stopping patience in epochs (default: 100)
 
-### For SwinJSCC_w/_SA model 
+**Adaptive mode options:**
+- `--ssf_target`: SSF activation location (enc, dec, both) for adaptive-* modes
 
-*e.g. cbr = 0.0625, snr = 1,4,7,10,13, metric = PSNR, channel = AWGN
+### Testing
 
+Test a trained model:
+
+```bash
+python main.py \
+    --testset Kodak \
+    --channel_type noiseless \
+    --progressive_mode alm \
+    --packet_size 32 \
+    --model_dir /path/to/models
 ```
-e.g.
-python main.py --trainset DIV2K --testset kodak --distortion-metric MSE --model SwinJSCC_w/_SA --channel-type awgn --C 96 --multiple-snr 1,4,7,10,13 --model_size base
-```
-### For SwinJSCC_w/_RA model 
-*e.g. cbr = 0.0208,0.0416,0.0625,0.0833,0.125, snr = 10, metric = PSNR, channel = AWGN
 
-```
-e.g.
-python main.py --trainset DIV2K --testset kodak --distortion-metric MSE --model SwinJSCC_w/_RA --channel-type awgn --C 32,64,96,128,192 --multiple-snr 10 --model_size base
+**Test mode arguments:**
+- `--model_dir`: Directory containing trained models (auto-discovered by progressive_mode)
+- Models are automatically found using naming: `{progressive_mode}_{alpha_mode}.pth` or `{progressive_mode}.pth`
+
+**Test features:**
+- Chunk-by-chunk performance evaluation (all modes)
+- For `off` mode: Sequential vs. variance-sorted transmission comparison
+- Performance metrics: PSNR, MS-SSIM
+
+### Examples
+
+**1. Train ALM-based model:**
+```bash
+python main.py \
+    --training \
+    --trainset DIV2K \
+    --testset Kodak \
+    --channel_type awgn \
+    --train_snr 10 \
+    --progressive_mode alm \
+    --alpha_mode exponential \
+    --packet_size 32
 ```
 
-### For SwinJSCC_w/_SAandRA model 
-*e.g. cbr = 0.0208,0.0416,0.0625,0.0833,0.125, snr = 1,4,7,10,13, metric = PSNR, channel = AWGN
-
+**2. Train adaptive-alm model:**
+```bash
+python main.py \
+    --training \
+    --trainset DIV2K \
+    --testset Kodak \
+    --channel_type awgn \
+    --train_snr 10 \
+    --progressive_mode adaptive-alm \
+    --alpha_mode exponential \
+    --packet_size 32 \
+    --ssf_target both
 ```
-e.g.
-python main.py --trainset DIV2K --testset kodak --distortion-metric MSE --model SwinJSCC_w/_SAandRA --channel-type awgn --C 32,64,96,128,192 --multiple-snr 1,4,7,10,13 --model_size base
+
+**3. Test trained model:**
+```bash
+python main.py \
+    --testset Kodak \
+    --channel_type noiseless \
+    --progressive_mode alm \
+    --alpha_mode exponential \
+    --packet_size 32 \
+    --model_dir ./results/.../models
 ```
 
->If you want to train this model, please add '--training'. 
+## Model Architecture
 
+- **Encoder**: Swin Transformer with 4 stages [128, 192, 256, 320] channels
+- **Decoder**: Symmetric Swin Transformer decoder
+- **Channel**: AWGN, Rayleigh fading, or noiseless
+- **Progressive transmission**: Features transmitted in chunks of `packet_size`
+
+## Training Details
+
+- **Loss functions**: 
+  - ALM modes: Final MSE + Lagrangian penalty
+  - MRL modes: Sum of all step MSEs
+  - Random mask modes: Partial step MSEs
+  
+- **Optimization**: 
+  - Optimizer: AdamW
+  - Learning rate scheduler: ReduceLROnPlateau
+  - Early stopping based on validation PSNR
+
+- **ALM parameters**:
+  - Rho (penalty parameter) adaptively updated
+  - Lambda (Lagrange multiplier) updated per epoch
+
+## Validation
+
+During validation, the system:
+- Evaluates chunk-by-chunk performance regardless of progressive mode
+- Logs PSNR and MS-SSIM for each chunk
+- Saves reconstructed images periodically
+
+## Results
+
+Results are saved in:
+- Training: `results/{trainset}_SNR{snr}_{alpha_mode}_{progressive_mode}/{timestamp}/`
+- Testing: `results/test_{testset}_{progressive_mode}_packet{size}/{timestamp}/`
+
+Each directory contains:
+- `models/`: Saved model checkpoints
+- `samples/`: Reconstructed images
+- `Log_*.log`: Training/testing logs
 
 ## Citation
 
-If you find this work useful for your research, please cite:
+If you use this code, please cite the original SwinJSCC paper:
 
-```
+```bibtex
 @ARTICLE{10589474,
   author={Yang, Ke and Wang, Sixian and Dai, Jincheng and Qin, Xiaoqi and Niu, Kai and Zhang, Ping},
   journal={IEEE Transactions on Cognitive Communications and Networking}, 
@@ -84,11 +210,9 @@ If you find this work useful for your research, please cite:
 ```
 
 ## Acknowledgement
-The implementation is based on [Swin Transformer](https://github.com/microsoft/Swin-Transformer).
 
-## Related links
-* BPG image format by _Fabrice Bellard_: https://bellard.org/bpg
-* Sionna An Open-Source Library for Next-Generation Physical Layer Research: https://github.com/NVlabs/sionna
-* DIV2K image dataset: https://data.vision.ee.ethz.ch/cvl/DIV2K/
-* Kodak image dataset: http://r0k.us/graphics/kodak/
-* CLIC image dataset:  http://compression.cc
+- Based on [Swin Transformer](https://github.com/microsoft/Swin-Transformer)
+- Dataset links:
+  - [DIV2K](https://data.vision.ee.ethz.ch/cvl/DIV2K/)
+  - [Kodak](http://r0k.us/graphics/kodak/)
+  - [CLIC2021](http://compression.cc)

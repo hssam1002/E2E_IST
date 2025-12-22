@@ -11,8 +11,6 @@ python main.py \
     --testset Kodak \
     --channel_type noiseless \
     --alpha_mode exponential \
-    --progressive_mode progressive \
+    --progressive_mode alm \
     --packet_size   32\
-    --train_snr 10 \
-    --save_start 0 \
-    --save_end 0
+    --train_snr 10

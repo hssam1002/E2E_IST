@@ -11,4 +11,6 @@ python main.py \
     --testset Kodak \
     --channel_type noiseless \
     --alpha_mode base \
+    --progressive_mode rand_mask_2 \
+    --packet_size   32\
     --train_snr 10

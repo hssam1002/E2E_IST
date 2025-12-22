@@ -1,14 +1,41 @@
+"""
+Decoder 모듈
+
+Swin Transformer 기반 Decoder를 구현합니다.
+특징 벡터를 이미지로 디코딩하는 역할을 합니다.
+"""
+
 from net.modules import *
 import torch
 import torch.nn as nn
-from datetime import datetime
-from net.encoder import SwinTransformerBlock # BasicLayer 등은 encoder에서 가져오거나 여기에 정의
+from net.encoder import SwinTransformerBlock
 import torch.utils.checkpoint as checkpoint
 
-# --------------------------------------------------------
-# 1. Basic Layer (Decoder용 - Upsample 포함)
-# --------------------------------------------------------
+# ============================================================================
+# Basic Layer (Decoder용 - Upsample 포함)
+# ============================================================================
 class BasicLayer(nn.Module):
+    """
+    Decoder용 기본 레이어 (Stage).
+    
+    여러 개의 SwinTransformerBlock과 Patch Reverse Merging 레이어로 구성됩니다.
+    Encoder와 달리 Upsampling을 수행합니다.
+    
+    Args:
+        dim (int): 입력 채널 수
+        out_dim (int): 출력 채널 수
+        input_resolution (tuple[int]): 입력 해상도
+        depth (int): SwinTransformerBlock의 개수
+        num_heads (int): Attention head 수
+        window_size (int): Window 크기
+        mlp_ratio (float): MLP expansion ratio
+        qkv_bias (bool): QKV bias 사용 여부
+        qk_scale (float | None): QK scale
+        norm_layer: Normalization 레이어
+        upsample: Upsampling 레이어 (PatchReverseMerging)
+        use_ssf (bool): SSF 사용 여부
+        use_checkpoint (bool): Gradient checkpointing 사용 여부
+    """
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  norm_layer=nn.LayerNorm, upsample=None, use_ssf=True, use_checkpoint=False):
@@ -19,39 +46,71 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
 
-        # build blocks
+        # SwinTransformerBlock 생성
         self.blocks = nn.ModuleList([
-            SwinTransformerBlock(dim=dim, input_resolution=input_resolution,
-                                 num_heads=num_heads, window_size=window_size,
-                                 shift_size=0 if (i % 2 == 0) else window_size // 2,
-                                 mlp_ratio=mlp_ratio,
-                                 qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                 norm_layer=norm_layer,
-                                 use_ssf = use_ssf)
-            for i in range(depth)])
+            SwinTransformerBlock(
+                dim=dim,
+                input_resolution=input_resolution,
+                num_heads=num_heads,
+                window_size=window_size,
+                shift_size=0 if (i % 2 == 0) else window_size // 2,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                norm_layer=norm_layer,
+                use_ssf=use_ssf
+            )
+            for i in range(depth)
+        ])
 
-        # patch merging layer
+        # Patch Reverse Merging 레이어 (해상도 증가 및 채널 감소)
         if upsample is not None:
-            self.upsample = upsample(input_resolution, dim=dim, out_dim=out_dim, norm_layer=norm_layer)
+            self.upsample = upsample(
+                input_resolution,
+                dim=dim,
+                out_dim=out_dim,
+                norm_layer=norm_layer
+            )
         else:
             self.upsample = None
 
     def forward(self, x):
+        """
+        Forward pass.
+        
+        Args:
+            x (torch.Tensor): 입력 텐서 (B, L, C)
+        
+        Returns:
+            torch.Tensor: 출력 텐서
+        """
+        # SwinTransformerBlock 통과
         for blk in self.blocks:
             if self.use_checkpoint:
+                # Gradient checkpointing: 메모리 절약
                 x = checkpoint.checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
+        
+        # Patch Reverse Merging (해상도 증가)
         if self.upsample is not None:
             x = self.upsample(x)
+        
         return x
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
     def update_resolution(self, H, W):
+        """
+        해상도 변경 시 내부 블록들의 해상도를 업데이트합니다.
+        
+        Args:
+            H (int): 새로운 높이
+            W (int): 새로운 너비
+        """
         self.input_resolution = (H, W)
-        for _, blk in enumerate(self.blocks):
+        for blk in self.blocks:
             blk.input_resolution = (H, W)
             blk.update_mask()
         if self.upsample is not None:
@@ -68,24 +127,46 @@ class BasicLayer(nn.Module):
         return flops
 
 class SwinJSCC_Decoder(nn.Module):
+    """
+    Swin Transformer 기반 Decoder.
+    
+    특징 벡터를 이미지로 디코딩합니다.
+    
+    Args:
+        img_size (tuple[int]): 복원 이미지의 최종 해상도 (예: (256, 256))
+        embed_dims (list[int]): 각 stage의 채널 차원 리스트 (예: [320, 256, 192, 128])
+        depths (list[int]): 각 stage의 Swin Transformer block 깊이 (예: [2, 6, 2, 2])
+        num_heads (list[int]): 각 stage의 attention head 수
+        window_size (int): Window Multi-head Self Attention의 window 크기. Default: 8
+        mlp_ratio (float): MLP feed-forward layer의 expansion ratio. Default: 4.0
+        qkv_bias (bool): Query, Key, Value에 learnable bias 추가 여부. Default: True
+        qk_scale (float | None): 기본 qk scale 오버라이드. Default: None
+        norm_layer: 블록에서 사용할 normalization 레이어. Default: nn.LayerNorm
+        patch_norm (bool): Patch merging 후 normalization 추가 여부. Default: True
+        model (str): 모델 타입 식별자 (예: 'E2E'). Default: None
+        patch_size (int): 초기 embedding의 patch 크기. Default: 2
+        in_chans (int): 출력 채널 수 (RGB 이미지의 경우 3). Default: 3
+        use_ssf (bool): SSF 사용 여부. Default: True
+        use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
+        **kwargs: 추가 인자
+    """
     def __init__(self, 
-                 img_size,       # Final resolution of the reconstructed image (e.g., (256, 256))
-                 embed_dims,     # List of channel dimensions for each stage in the decoder (e.g., [384, 192, 96])
-                 depths,         # List of Swin Transformer block depths for each stage (e.g., [2, 2, 6])
-                 num_heads,      # List of attention heads for each stage
-                 window_size=8,  # Window size for Window Multi-head Self Attention (W-MSA)
-                 mlp_ratio=4.,   # Expansion ratio for the MLP feed-forward layer
-                 qkv_bias=True,  # If True, add a learnable bias to query, key, value
-                 qk_scale=None,  # Override default qk scale of head_dim ** -0.5 if set
-                 norm_layer=nn.LayerNorm, # Normalization layer used in blocks
-                 patch_norm=True,# If True, add normalization after patch merging
-                 model=None,     # Model type identifier (e.g., 'E2E')
-                 patch_size=2,   # Patch size for initial embedding (kept for kwargs compatibility)
-                 in_chans=3,     # Number of output channels for the reconstructed image (usually 3 for RGB)
-                 use_ssf = True, # Use of SSF or not
-                 use_checkpoint = False,
-                 **kwargs
-                 ):
+                 img_size,
+                 embed_dims,
+                 depths,
+                 num_heads,
+                 window_size=8,
+                 mlp_ratio=4.,
+                 qkv_bias=True,
+                 qk_scale=None,
+                 norm_layer=nn.LayerNorm,
+                 patch_norm=True,
+                 model=None,
+                 patch_size=2,
+                 in_chans=3,
+                 use_ssf=True,
+                 use_checkpoint=False,
+                 **kwargs):
         super().__init__()
 
         self.num_layers = len(depths)
@@ -127,24 +208,45 @@ class SwinJSCC_Decoder(nn.Module):
             nn.init.constant_(m.weight, 1.0)
 
     def forward(self, x):
-         # Reconstruction
+        """
+        Forward pass.
+        
+        Args:
+            x (torch.Tensor): 인코딩된 특징 벡터 (B, L, C)
+        
+        Returns:
+            torch.Tensor: 복원된 이미지 (B, 3, H, W)
+        """
+        # Head layer 통과
         x_recon = self.head_list(x)
+        
+        # Swin Transformer layers (Upsampling 포함)
         for layer in self.layers:
             x_recon = layer(x_recon)
 
-        # (B, L, 3) -> (B, 3, H, W)
+        # (B, L, 3) -> (B, 3, H, W) 변환
         B, L, Ch = x_recon.shape
         x_recon = x_recon.view(B, self.H, self.W, Ch).permute(0, 3, 1, 2)
+        
         return x_recon
     
     def update_resolution(self, H, W):
-        self.H = H * 2 ** len(self.layers)
-        self.W = W * 2 ** len(self.layers)
-        # self.patches_resolution 업데이트 필요
+        """
+        입력 해상도 변경 시 내부 레이어들의 해상도를 업데이트합니다.
+        
+        Args:
+            H (int): 새로운 높이
+            W (int): 새로운 너비
+        """
+        self.H = H * (2 ** len(self.layers))
+        self.W = W * (2 ** len(self.layers))
         self.patches_resolution = (H, W)
+        
         for i_layer, layer in enumerate(self.layers):
-            layer.update_resolution(H * (2 ** i_layer),
-                                    W * (2 ** i_layer))
+            layer.update_resolution(
+                H * (2 ** i_layer),
+                W * (2 ** i_layer)
+            )
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -161,22 +263,15 @@ class SwinJSCC_Decoder(nn.Module):
         return flops
 
 def create_decoder(**kwargs):
+    """
+    Decoder 인스턴스를 생성합니다.
+    
+    Args:
+        **kwargs: SwinJSCC_Decoder 생성자에 전달할 인자
+    
+    Returns:
+        SwinJSCC_Decoder: 생성된 decoder 인스턴스
+    """
     model = SwinJSCC_Decoder(**kwargs)
     return model
-
-def build_model(config):
-    input_image = torch.ones([1, 1536, 256]).to(config.device)
-    model = create_decoder(**config.encoder_kwargs).to(config.device)
-    t0 = datetime.datetime.now()
-    with torch.no_grad():
-        for i in range(100):
-            features = model(input_image, SNR=15)
-        t1 = datetime.datetime.now()
-        delta_t = t1 - t0
-        print("Decoding Time per img {}s".format((delta_t.seconds + 1e-6 * delta_t.microseconds) / 100))
-    print("TOTAL FLOPs {}G".format(model.flops() / 10 ** 9))
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    print("TOTAL Params {}M".format(num_params / 10 ** 6))
 
