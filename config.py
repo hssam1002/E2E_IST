@@ -88,8 +88,8 @@ def setup_argument_parser():
         '--alpha_mode', 
         type=str, 
         default='exponential',
-        choices=['linear', 'inverse', 'square', 'exponential', 'uniform'],
-        help='Progressive weights mode'
+        choices=['linear', 'inverse', 'square', 'exponential', 'uniform', 'base'],
+        help='Progressive weights mode (only used for alm, adaptive-alm modes)'
     )
     parser.add_argument(
         '--progressive_mode', 

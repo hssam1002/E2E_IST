@@ -87,14 +87,27 @@ def find_model_path(model_dir, progressive_mode, alpha_mode=None):
     # Alpha mode needed for alm, adaptive-alm
     needs_alpha_mode = progressive_mode in ['alm', 'adaptive-alm']
     
-    if needs_alpha_mode and alpha_mode:
-        candidate1 = os.path.join(model_dir, f"{progressive_mode}_{alpha_mode}.pth")
-        if os.path.exists(candidate1):
-            return candidate1
+    # Try multiple naming conventions
+    candidates = []
     
-    candidate2 = os.path.join(model_dir, f"{progressive_mode}.pth")
-    if os.path.exists(candidate2):
-        return candidate2
+    # 1. {progressive_mode}_{alpha_mode}.pth (for alm, adaptive-alm)
+    if needs_alpha_mode and alpha_mode:
+        candidates.append(os.path.join(model_dir, f"{progressive_mode}_{alpha_mode}.pth"))
+    
+    # 2. best_model_{alpha_mode}.pth (common naming convention)
+    if alpha_mode:
+        candidates.append(os.path.join(model_dir, f"best_model_{alpha_mode}.pth"))
+    
+    # 3. {progressive_mode}.pth
+    candidates.append(os.path.join(model_dir, f"{progressive_mode}.pth"))
+    
+    # 4. best_model_base.pth (fallback for base modes)
+    candidates.append(os.path.join(model_dir, "best_model_base.pth"))
+    
+    # Check candidates in order
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
     
     return None
 
