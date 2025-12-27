@@ -4,77 +4,85 @@ Training functions
 
 import time
 import os
+import numpy as np
 import torch
 import torch.nn as nn
 from utils import AverageMeter
-from model_utils import get_alpha_sequence
-from config import DEFAULT_RHO_INIT, DEFAULT_RHO_GAMMA, DEFAULT_RHO_MAX, DEFAULT_ZETA
 
-def compute_loss(args, mse_list, input_img, alpha, lambda_l, rho, d_s_0, L):
+def compute_loss(args, mse_list, ms_ssim_list, recon_list, input_img, device):
     """
-    Compute loss based on progressive mode.
+    Compute loss based on learning mode with weighted combination of MSE and MS-SSIM.
     
     Args:
         args: Parsed arguments
         mse_list (list): List of MSE losses for each step
-        input_img (torch.Tensor): Input image
-        alpha (torch.Tensor): Alpha weight sequence
-        lambda_l (torch.Tensor): Lagrange multiplier
-        rho (float): Penalty parameter
-        d_s_0 (torch.Tensor): Initial distortion (Mean(X^2))
-        L (int): Number of progressive steps
+        ms_ssim_list (list): List of MS-SSIM losses for each step (already 1 - ms_ssim)
+        recon_list (list): List of reconstructed images for each step
+        input_img (torch.Tensor): Input image (B, 3, H, W)
+        device: Device to compute on
     
     Returns:
-        tuple: (total_loss, h_stack, loss_h_term)
+        torch.Tensor: Total loss
     """
-    final_recon_loss = mse_list[-1]
-    loss_h_term = torch.tensor(0.0, device=input_img.device)
-    h_stack = None
+    # Parse loss weights
+    loss_weights = [float(x.strip()) for x in args.loss_weights.split(',')]
+    if len(loss_weights) != 2:
+        raise ValueError(f"loss_weights must have 2 values [MSE, MS-SSIM]. Got {len(loss_weights)}")
+    w_mse, w_ms_ssim = loss_weights
     
-    if args.progressive_mode == 'off':
-        total_loss = final_recon_loss
-    
-    elif args.progressive_mode in ['mrl', 'adaptive-mrl']:
-        total_loss = torch.sum(torch.stack(mse_list))
-    
-    elif args.progressive_mode == 'rand_mask_1':
-        total_loss = mse_list[0]
-    
-    elif args.progressive_mode == 'rand_mask_2':
-        total_loss = mse_list[0] + mse_list[1]
-    
-    elif args.progressive_mode in ['alm', 'adaptive-alm']:
-        loss_main = mse_list[-1]
-        
-        # Constraint: h_l = alpha_l - reduction_ratio_l
-        all_distortions = [d_s_0] + mse_list
-        h_list = []
-        
-        for l in range(1, L + 1):
-            prev_mse = all_distortions[l - 1]
-            curr_mse = all_distortions[l]
-            reduction_ratio = (prev_mse - curr_mse) / d_s_0
-            h_val = alpha[l - 1] - reduction_ratio
-            h_list.append(h_val)
-        
-        h_stack = torch.stack(h_list)
-        h_relu = torch.nn.functional.relu(h_stack)
-        
-        # Lagrangian: lambda^T * h + (rho/2) * ||h||^2
-        lagrangian = (
-            torch.sum(lambda_l * h_relu) + 
-            (rho / 2) * torch.sum(h_relu ** 2)
-        )
-        total_loss = loss_main + lagrangian
-        loss_h_term = lagrangian.detach()
-    
+    # Select which losses to use based on learning mode
+    if args.learning_mode == 'non-progressive':
+        # loss = lambda_mse * mse + lambda_ms * (1 - ms_ssim)
+        mse_selections = [mse_list[0]]
+        ms_ssim_selections = [ms_ssim_list[0]]
+    elif args.learning_mode == 'rand_mask_1':
+        # loss = lambda_mse * mse + lambda_ms * (1 - ms_ssim)
+        mse_selections = [mse_list[0]]
+        ms_ssim_selections = [ms_ssim_list[0]]
+    elif args.learning_mode == 'rand_mask_2':
+        # loss = loss_total + loss_rand
+        # loss_total = lambda_mse * mse_full + lambda_ms * (1 - ms_ssim_full)
+        # loss_rand = lambda_mse * mse_partial + lambda_ms * (1 - ms_ssim_partial)
+        mse_selections = mse_list  # [partial_mse, full_mse]
+        ms_ssim_selections = ms_ssim_list  # [partial_ms_ssim_loss, full_ms_ssim_loss]
     else:
-        raise ValueError(f"Unknown progressive_mode: {args.progressive_mode}")
+        raise ValueError(f"Unknown learning_mode: {args.learning_mode}")
     
-    return total_loss, h_stack, loss_h_term
+    # Initialize loss components
+    # Start with first loss to ensure requires_grad is set correctly
+    total_loss = None
+    
+    # Compute loss for each selected reconstruction
+    for mse_loss, ms_ssim_loss in zip(mse_selections, ms_ssim_selections):
+        chunk_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        
+        # MSE component
+        if w_mse > 0:
+            # Ensure mse_loss is scalar
+            if mse_loss.dim() > 0:
+                mse_loss = mse_loss.mean()
+            chunk_loss = chunk_loss + w_mse * mse_loss
+        
+        # MS-SSIM component (already 1 - ms_ssim from network)
+        if w_ms_ssim > 0:
+            # Ensure ms_ssim_loss is scalar
+            if ms_ssim_loss.dim() > 0:
+                ms_ssim_loss = ms_ssim_loss.mean()
+            chunk_loss = chunk_loss + w_ms_ssim * ms_ssim_loss
+        
+        # Accumulate total loss
+        if total_loss is None:
+            total_loss = chunk_loss
+        else:
+            total_loss = total_loss + chunk_loss
+    
+    # If no losses were computed, return zero loss with grad
+    if total_loss is None:
+        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+    
+    return total_loss
 
-def train_one_epoch(args, epoch, net, optimizer, train_loader, config, 
-                     lambda_l, rho, logger):
+def train_one_epoch(args, epoch, net, optimizer, train_loader, config, logger, global_step):
     """
     Train for one epoch.
     
@@ -85,112 +93,99 @@ def train_one_epoch(args, epoch, net, optimizer, train_loader, config,
         optimizer: Optimizer
         train_loader: Training data loader
         config: Config object
-        lambda_l (torch.Tensor): Lagrange multiplier
-        rho (float): Penalty parameter
         logger: Logger object
+        global_step: Global step counter (will be updated)
     
     Returns:
-        torch.Tensor: Average constraint violation (for rho update)
+        int: Updated global_step
     """
     net.train()
     
     elapsed = AverageMeter()
     losses = AverageMeter()
-    mse_losses = AverageMeter()
-    h_losses = AverageMeter()
-    
-    # Calculate number of progressive steps
-    C_total = config.encoder_kwargs['embed_dims'][-1]
-    F = args.packet_size
-    L = (C_total + F - 1) // F
-    
-    # Generate alpha sequence (for ALM-based)
-    alpha = get_alpha_sequence(L, mode=args.alpha_mode, device=config.device)
-    h_accumulator = torch.zeros(L, device=config.device)
-    num_batches = 0
+    psnr_avg = AverageMeter()
+    ms_ssim_avg = AverageMeter()
     
     for batch_idx, input_img in enumerate(train_loader):
         start_time = time.time()
         input_img = input_img.to(config.device)
-        num_batches += 1
         
         # Forward pass
         results = net(input_img, args.train_snr)
-        mse_list = [m.mean() for m in results['mse']]
+        mse_list = results['mse']
+        ms_ssim_list = results['ms_ssim']
+        recon_list = results['recon_img']
         
-        # Calculate initial distortion
-        d_s_0 = torch.mean(input_img ** 2).detach()
+        # Compute loss (with weighted combination of MSE and MS-SSIM)
+        total_loss = compute_loss(args, mse_list, ms_ssim_list, recon_list, input_img, config.device)
         
-        # Compute loss
-        total_loss, h_stack, loss_h_term = compute_loss(
-            args, mse_list, input_img, alpha, lambda_l, rho, d_s_0, L
-        )
-        
-        # Accumulate constraint violations (for ALM update)
-        if h_stack is not None:
-            h_accumulator += h_stack.detach()
+        # Scale loss by accumulation steps
+        total_loss = total_loss / config.gradient_accumulation_steps
         
         # Backward pass
-        optimizer.zero_grad()
         total_loss.backward()
-        optimizer.step()
         
-        # Logging
+        # Update weights only after accumulating gradients for specified steps
+        if (batch_idx + 1) % config.gradient_accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            # Update global step after optimizer step
+            global_step += 1
+        
+        # Compute PSNR and MS-SSIM for logging
+        # Select which reconstruction to use based on learning mode
+        if args.learning_mode == 'non-progressive':
+            mse_val = mse_list[0].mean()
+            ms_ssim_loss = ms_ssim_list[0].mean()
+        elif args.learning_mode == 'rand_mask_1':
+            mse_val = mse_list[0].mean()
+            ms_ssim_loss = ms_ssim_list[0].mean()
+        elif args.learning_mode == 'rand_mask_2':
+            # Use full reconstruction for metrics (final performance)
+            mse_val = mse_list[1].mean()  # full_mse
+            ms_ssim_loss = ms_ssim_list[1].mean()  # full_ms_ssim_loss
+        else:
+            mse_val = mse_list[0].mean()
+            ms_ssim_loss = ms_ssim_list[0].mean()
+        
+        # Calculate PSNR
+        if mse_val.item() > 0:
+            psnr = 10 * np.log10(1.0 / mse_val.item())
+            psnr_avg.update(psnr)
+        
+        # Calculate MS-SSIM similarity (1 - loss)
+        ms_ssim_sim = 1.0 - ms_ssim_loss.item()
+        ms_ssim_avg.update(ms_ssim_sim)
+        
+        # Logging (scale loss back for logging since we divided by accumulation_steps)
         elapsed.update(time.time() - start_time)
-        losses.update(total_loss.item())
-        mse_losses.update(mse_list[-1].item())
-        h_losses.update(loss_h_term.item())
+        losses.update(total_loss.item() * config.gradient_accumulation_steps)
+    
+    # Handle remaining gradients at the end of epoch (if batch count is not divisible by accumulation_steps)
+    if len(train_loader) % config.gradient_accumulation_steps != 0:
+        optimizer.step()
+        optimizer.zero_grad()
+        global_step += 1
     
     # End of epoch logging
     if (epoch % config.print_step) == 0:
         current_lr = optimizer.param_groups[0]['lr']
-        avg_lam = lambda_l.mean().item() if len(lambda_l) > 0 else 0.0
+        steps_epoch = global_step // len(train_loader)
         logger.info(
             f'Epoch {epoch} | '
-            f'Total {losses.avg:.6f} | '
-            f'MSE {mse_losses.avg:.6f} | '
-            f'H-term {h_losses.avg:.8f} | '
+            f'Step {global_step} | '
+            f'Steps/Epoch {steps_epoch} | '
+            f'Loss {losses.avg:.6f} | '
+            f'PSNR {psnr_avg.avg:.2f} dB | '
+            f'MS-SSIM {ms_ssim_avg.avg:.4f} | '
             f'SNR {args.train_snr} | '
-            f'Rho {rho:.2e} | '
-            f'Lam {avg_lam:.2e} | '
             f'LR {current_lr:.2e}'
         )
     
-    return h_accumulator / num_batches if num_batches > 0 else h_accumulator
-
-def update_alm_parameters(lambda_l, h_avg, rho, prev_h_norm, 
-                          gamma=DEFAULT_RHO_GAMMA, 
-                          max_rho=DEFAULT_RHO_MAX,
-                          zeta=DEFAULT_ZETA):
-    """
-    Update ALM (Augmented Lagrangian Method) parameters.
-    
-    Args:
-        lambda_l (torch.Tensor): Lagrange multiplier
-        h_avg (torch.Tensor): Average constraint violation
-        rho (float): Current penalty parameter
-        prev_h_norm (float): Previous constraint violation norm
-        gamma (float): Rho increase rate
-        max_rho (float): Maximum rho
-        zeta (float): Improvement threshold
-    
-    Returns:
-        tuple: (updated_lambda_l, updated_rho, curr_h_norm)
-    """
-    # Lambda update: lambda_{t+1} = relu(lambda_t + rho * h_{t+1})
-    updated_lambda_l = torch.nn.functional.relu(lambda_l + rho * h_avg)
-    
-    # Rho update: increase if constraint violation doesn't improve
-    curr_h_norm = torch.norm(h_avg).item()
-    updated_rho = rho
-    
-    if curr_h_norm > zeta * prev_h_norm:
-        updated_rho = min(max_rho, rho * gamma)
-    
-    return updated_lambda_l, updated_rho, curr_h_norm
+    return global_step
 
 def train_model(args, net, optimizer, scheduler, train_loader, val_loader, 
-                config, lambda_l, rho, prev_h_norm, logger):
+                config, logger):
     """
     Main training loop.
     
@@ -202,60 +197,49 @@ def train_model(args, net, optimizer, scheduler, train_loader, val_loader,
         train_loader: Training data loader
         val_loader: Validation data loader
         config: Config object
-        lambda_l (torch.Tensor): Lagrange multiplier
-        rho (float): Penalty parameter
-        prev_h_norm (float): Previous constraint violation norm
         logger: Logger object
     """
-    from test import validate
+    from test import validate, validate_progressive
     
-    best_psnr = -1e9
-    epochs_no_improve = 0
-    curr_h_norm = 0.0
+    global_step = 0
+    best_PSNR = 0
     
     for epoch in range(config.tot_epoch):
         # Training
-        h_avg = train_one_epoch(
-            args, epoch, net, optimizer, train_loader, 
-            config, lambda_l, rho, logger
-        )
-        
-        # ALM parameter update (only for ALM-based modes)
-        if args.progressive_mode in ['alm', 'adaptive-alm']:
-            lambda_l, rho, curr_h_norm = update_alm_parameters(
-                lambda_l, h_avg, rho, prev_h_norm
-            )
-            prev_h_norm = curr_h_norm
+        global_step = train_one_epoch(args, epoch, net, optimizer, train_loader, config, logger, global_step)
         
         # Logging
         if (epoch % config.print_step) == 0:
             logger.info(
                 f"Start Epoch {epoch} | "
-                f"Mode: {args.progressive_mode} | "
-                f"Alpha: {args.alpha_mode}"
+                f"Mode: {args.learning_mode}"
             )
-            if args.progressive_mode in ['alm', 'adaptive-alm']:
-                logger.info(
-                    f"   >> [ALM Update] Rho: {rho:.4f} | "
-                    f"Lambda Avg: {lambda_l.mean().item():.2e} | "
-                    f"H Norm: {curr_h_norm:.4f}"
-                )
         
         # Validation
         if (epoch + 1) % config.save_model_freq == 0:
-            avg_psnr = validate(
+            # Normal validation (uses learning_mode configuration)
+            avg_psnr, avg_loss = validate(
                 val_loader, net, args.train_snr, epoch, 
                 config, args, logger, save_freq=50
             )
             
-            # Learning rate scheduler update
-            scheduler.step(avg_psnr)
+            # Progressive validation (100 epoch마다만 실행)
+            if (epoch + 1) % 100 == 0:
+                logger.info("=" * 80)
+                logger.info("Running Progressive Validation (every 100 epochs)...")
+                logger.info("=" * 80)
+                validate_progressive(
+                    val_loader, net, args.train_snr, epoch,
+                    config, args, logger, save_freq=50
+                )
             
-            # Save best model
-            if avg_psnr > best_psnr:
-                best_psnr = avg_psnr
-                epochs_no_improve = 0
-                save_name = f'best_model_{args.alpha_mode}.pth'
+            # Learning rate scheduler update (MultiStepLR updates per step/epoch)
+            scheduler.step()
+            
+            # Save best model based on PSNR (higher is better)
+            if avg_psnr > best_PSNR:
+                best_PSNR = avg_psnr
+                save_name = f'best_model_{args.learning_mode}.pth'
                 save_path = os.path.join(config.models, save_name)
                 
                 if isinstance(net, nn.DataParallel):
@@ -263,11 +247,4 @@ def train_model(args, net, optimizer, scheduler, train_loader, val_loader,
                 else:
                     torch.save(net.state_dict(), save_path)
                 
-                logger.info(f"Best Model Saved! PSNR: {best_psnr:.4f}")
-            else:
-                epochs_no_improve += config.save_model_freq
-            
-            # Early stopping
-            if epochs_no_improve >= args.patience:
-                logger.info("Early Stopping.")
-                break
+                logger.info(f"Best Model Saved! PSNR: {best_PSNR:.4f} dB, Loss: {avg_loss:.6f}")

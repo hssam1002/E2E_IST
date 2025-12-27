@@ -30,11 +30,10 @@ class SwinTransformerBlock(nn.Module):
         qk_scale (float | None, optional): 기본 qk scale (head_dim ** -0.5) 오버라이드
         act_layer (nn.Module, optional): Activation 함수. Default: nn.GELU
         norm_layer (nn.Module, optional): Normalization 레이어. Default: nn.LayerNorm
-        use_ssf (bool): SSF(Scale & Shift Feature) 레이어 활성화 여부 (Adaptation용)
     """
     def __init__(self, dim, input_resolution, num_heads, window_size=7, shift_size=0,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, act_layer=nn.GELU,
-                 norm_layer=nn.LayerNorm, use_ssf=False):
+                 norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
@@ -42,7 +41,6 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        self.use_ssf = use_ssf
 
         # Window size 조정 (input resolution보다 크면 shift 안 함)
         if min(self.input_resolution) <= self.window_size:
@@ -53,27 +51,15 @@ class SwinTransformerBlock(nn.Module):
         # --- 1. Attention Part ---
         self.norm1 = norm_layer(dim)
 
-        # [SSF] After norm1
-        self.ssf1 = SSF(dim) if use_ssf else nn.Identity()
-
         self.attn = WindowAttention(
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale)
-        
-        # [SSF] After attention
-        self.ssf2 = SSF(dim) if use_ssf else nn.Identity()
 
         # --- 2. MLP Part ---
         self.norm2 = norm_layer(dim)
 
-        # [SSF] After norm2
-        self.ssf3 = SSF(dim) if use_ssf else nn.Identity()
-
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer)
-        
-        # [SSF] After MLP
-        self.ssf4 = SSF(dim) if use_ssf else nn.Identity()
 
         # --- 3. Attention Mask Setup (기존과 동일) ---
         if self.shift_size > 0:
@@ -103,14 +89,16 @@ class SwinTransformerBlock(nn.Module):
     def forward(self, x):
         H, W = self.input_resolution
         B, L, C = x.shape
-        assert L == H * W, "input feature has wrong size"
+        if L != H * W:
+            raise AssertionError(
+                f"input feature has wrong size: expected L={H*W} (H={H}, W={W}), "
+                f"but got L={L}. Actual feature shape: {x.shape}"
+            )
+        assert L == H * W, f"input feature has wrong size: expected L={H*W} (H={H}, W={W}), but got L={L}"
 
         shortcut = x
 
-        # 1. Norm -> [SSF] -> Window Attention -> [SSF]
         x = self.norm1(x)
-        if self.use_ssf: x = self.ssf1(x) # SSF 적용
-
         x = x.view(B, H, W, C)
 
         # Cyclic Shift
@@ -139,18 +127,14 @@ class SwinTransformerBlock(nn.Module):
             x = shifted_x
         x = x.view(B, L, C)
 
-        if self.use_ssf: x = self.ssf2(x) # SSF 적용
-
         # FFN (Add Residual)
         x = shortcut + x
 
-        # 2. Norm -> [SSF] -> MLP -> [SSF]
+        # 2. Norm -> MLP
         shortcut = x
         x = self.norm2(x)
-        if self.use_ssf: x = self.ssf3(x) # SSF 적용
         
         x = self.mlp(x)
-        if self.use_ssf: x = self.ssf4(x) # SSF 적용
         
         x = shortcut + x
 
@@ -221,40 +205,47 @@ class BasicLayer(nn.Module):
         qk_scale (float | None): QK scale
         norm_layer: Normalization 레이어
         downsample: Downsampling 레이어 (PatchMerging)
-        use_ssf (bool): SSF 사용 여부
         use_checkpoint (bool): Gradient checkpointing 사용 여부 (메모리 절약)
     """
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, norm_layer=nn.LayerNorm,
-                 downsample=None, use_ssf=False, use_checkpoint=False):
+                 downsample=None, use_checkpoint=False):
 
         super().__init__()
         self.dim = dim
-        self.input_resolution = input_resolution
         self.depth = depth
         self.use_checkpoint = use_checkpoint
+        
+        # 참조 코드 (HJSCC)와 동일하게:
+        # self.input_resolution은 blocks가 처리할 해상도 (downsample 후)
+        # input_resolution 파라미터는 BasicLayer에 입력되는 해상도 (downsample 전)
+        if downsample is not None:
+            self.input_resolution = (input_resolution[0] // 2, input_resolution[1] // 2)
+        else:
+            self.input_resolution = input_resolution
 
         # SwinTransformerBlock 생성 (짝수 인덱스: W-MSA, 홀수 인덱스: SW-MSA)
+        # blocks는 downsample 후 해상도 (self.input_resolution)를 처리
         self.blocks = nn.ModuleList([
             SwinTransformerBlock(
                 dim=out_dim,
-                input_resolution=(input_resolution[0] // 2, input_resolution[1] // 2),
+                input_resolution=self.input_resolution,
                 num_heads=num_heads,
                 window_size=window_size,
                 shift_size=0 if (i % 2 == 0) else window_size // 2,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
-                norm_layer=norm_layer,
-                use_ssf=use_ssf
+                norm_layer=norm_layer
             )
             for i in range(depth)
         ])
 
         # Patch Merging 레이어 (해상도 감소 및 채널 증가)
+        # downsample.input_resolution은 BasicLayer에 입력되는 해상도 (downsample 전)
         if downsample is not None:
             self.downsample = downsample(
-                input_resolution, 
+                input_resolution,  # downsample 전 해상도
                 dim=dim, 
                 out_dim=out_dim, 
                 norm_layer=norm_layer
@@ -303,12 +294,20 @@ class BasicLayer(nn.Module):
         해상도 변경 시 내부 블록들의 해상도를 업데이트합니다.
         
         Args:
-            H (int): 새로운 높이
-            W (int): 새로운 너비
+            H (int): 새로운 높이 (blocks가 처리할 해상도, downsample 후)
+            W (int): 새로운 너비 (blocks가 처리할 해상도, downsample 후)
+        
+        참조: HJSCC의 BasicLayerEnc.update_resolution
         """
+        # self.input_resolution은 blocks가 처리할 해상도 (downsample 후)
+        self.input_resolution = (H, W)
+        
+        # blocks는 downsample 후 해상도 (H, W)를 처리
         for blk in self.blocks:
             blk.input_resolution = (H, W)
             blk.update_mask()
+        
+        # downsample이 있으면 downsample.input_resolution은 downsample 전 해상도 (H*2, W*2)
         if self.downsample is not None:
             self.downsample.input_resolution = (H * 2, W * 2)
 
@@ -321,6 +320,7 @@ class SwinJSCC_Encoder(nn.Module):
     Args:
         img_size (tuple[int]): 입력 이미지 해상도 (예: (256, 256))
         embed_dims (list[int]): 각 stage의 채널 차원 리스트 (예: [128, 192, 256, 320])
+        patch_embed_size (int): PatchEmbed의 patch 크기. Default: 2. PatchMerging은 항상 2배 downsampling.
         depths (list[int]): 각 stage의 Swin Transformer block 깊이 (예: [2, 2, 6, 2])
         num_heads (list[int]): 각 stage의 attention head 수
         window_size (int): Window Multi-head Self Attention의 window 크기. Default: 8
@@ -330,9 +330,7 @@ class SwinJSCC_Encoder(nn.Module):
         norm_layer: 블록에서 사용할 normalization 레이어. Default: nn.LayerNorm
         patch_norm (bool): Patch merging 후 normalization 추가 여부. Default: True
         model (str): 모델 타입 식별자 (예: 'E2E'). Default: None
-        patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 입력 채널 수 (RGB 이미지의 경우 3). Default: 3
-        use_ssf (bool): SSF 사용 여부. Default: False
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
         **kwargs: 추가 인자
     """
@@ -341,16 +339,15 @@ class SwinJSCC_Encoder(nn.Module):
                  embed_dims,
                  depths,
                  num_heads,
-                 window_size=8,
-                 mlp_ratio=4.,
+                 patch_embed_size = 2,  # PatchEmbed의 patch 크기 (기본값 2)
+                 window_size = 8,  # Can be int or list[int]
+                 mlp_ratio = 4.,
                  qkv_bias=True,
                  qk_scale=None,
                  norm_layer=nn.LayerNorm,
                  patch_norm=True,
                  model=None,
-                 patch_size=2,
                  in_chans=3,
-                 use_ssf=False,
                  use_checkpoint=False,
                  **kwargs):
         super().__init__()
@@ -359,29 +356,61 @@ class SwinJSCC_Encoder(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.embed_dims = embed_dims
         self.in_chans = in_chans
-        self.patch_size = patch_size
-        self.patches_resolution = img_size
-        self.H = img_size[0] // (2 ** self.num_layers)
-        self.W = img_size[1] // (2 ** self.num_layers)
-        self.patch_embed = PatchEmbed(img_size, 2, 3, embed_dims[0])
-        self.use_ssf = use_ssf
+        self.patch_embed_size = patch_embed_size  # PatchEmbed에만 사용
+        self.input_resolution = img_size  # 초기 입력 해상도 저장 (tuple로 유지)
+        
+        # Stage 0: PatchEmbed 후 해상도 = img_size // patch_embed_size
+        # 예: patch_embed_size=4, img_size=256 -> 256 // 4 = 64
+        #     256*256*3 -> 64*64*embed_dims[0]
+        patches_resolution_after_embed = (img_size[0] // patch_embed_size, img_size[1] // patch_embed_size)
+        self.patches_resolution = [patches_resolution_after_embed]
+        
+        # 이후 stages는 PatchMerging으로 2배씩 downsampling (항상 2배, patch_size는 고정)
+        for i in range(1, self.num_layers):
+            prev_h, prev_w = self.patches_resolution[i-1]
+            self.patches_resolution.append((prev_h // 2, prev_w // 2))
+
+        
+        # 최종 feature map 해상도
+        self.H = self.patches_resolution[-1][0]
+        self.W = self.patches_resolution[-1][1]
+        
+        # PatchEmbed 초기화 (patch_embed_size 사용)
+        # 예: patch_embed_size = 4 -> 256*256*3 -> 64*64*embed_dims[0]
+        self.patch_embed = PatchEmbed(img_size, patch_embed_size, in_chans, embed_dims[0])
         self.use_checkpoint = use_checkpoint
+        
+        # Handle window_size: can be int (single value) or list (per stage)
+        if isinstance(window_size, (list, tuple)):
+            if len(window_size) != self.num_layers:
+                raise ValueError(f"window_size list length ({len(window_size)}) must match num_layers ({self.num_layers})")
+            window_sizes = window_size
+        else:
+            window_sizes = [window_size] * self.num_layers
         
         # build layers
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
+            # BasicLayer의 input_resolution은 BasicLayer에 입력되는 해상도 (downsample 전)
+            # Stage 0: PatchEmbed 후 해상도 = patches_resolution[0]
+            # Stage 1+: 이전 stage의 output 해상도 = patches_resolution[i_layer-1]
+            if i_layer == 0:
+                # Stage 0: PatchEmbed 후 해상도
+                layer_input_h, layer_input_w = self.patches_resolution[0]
+            else:
+                # Stage 1+: 이전 stage의 output 해상도 (downsample 전)
+                layer_input_h, layer_input_w = self.patches_resolution[i_layer - 1]
+            
             layer = BasicLayer(dim=int(embed_dims[i_layer - 1]) if i_layer != 0 else 3,
                                out_dim=int(embed_dims[i_layer]),
-                               input_resolution=(self.patches_resolution[0] // (2 ** i_layer),
-                                                 self.patches_resolution[1] // (2 ** i_layer)),
-                               depth=depths[i_layer],
-                               num_heads=num_heads[i_layer],
-                               window_size=window_size,
-                               mlp_ratio=self.mlp_ratio,
-                               qkv_bias=qkv_bias, qk_scale=qk_scale,
-                               norm_layer=norm_layer,
-                               downsample=PatchMerging if i_layer != 0 else None,
-                               use_ssf = self.use_ssf,
+                               input_resolution=(layer_input_h, layer_input_w),
+                               depth = depths[i_layer],
+                               num_heads = num_heads[i_layer],
+                               window_size = window_sizes[i_layer],
+                               mlp_ratio = self.mlp_ratio,
+                               qkv_bias = qkv_bias, qk_scale=qk_scale,
+                               norm_layer = norm_layer,
+                               downsample = PatchMerging if i_layer != 0 else None,
                                use_checkpoint = self.use_checkpoint)
             print("Encoder ", layer.extra_repr())
             self.layers.append(layer)
@@ -403,6 +432,10 @@ class SwinJSCC_Encoder(nn.Module):
             torch.Tensor: 인코딩된 특징 벡터 (B, L, C)
         """
         B, C, H, W = x.size()
+        
+        # 입력 해상도가 변경되었으면 update_resolution 호출
+        if not hasattr(self, 'input_resolution') or H != self.input_resolution[0] or W != self.input_resolution[1]:
+            self.update_resolution(H, W)
         
         # Patch embedding
         x = self.patch_embed(x)
@@ -460,15 +493,33 @@ class SwinJSCC_Encoder(nn.Module):
         입력 해상도 변경 시 내부 레이어들의 해상도를 업데이트합니다.
         
         Args:
-            H (int): 새로운 높이
-            W (int): 새로운 너비
+            H (int): 새로운 높이 (원본 이미지 해상도)
+            W (int): 새로운 너비 (원본 이미지 해상도)
         """
         self.input_resolution = (H, W)
+        
+        # PatchEmbed 해상도 업데이트 (patch_embed_size 사용)
+        patch_embed_size = self.patch_embed_size
+        patches_resolution_after_embed = (H // patch_embed_size, W // patch_embed_size)
+
+        # 각 stage별 patches_resolution 업데이트
+        # Stage 0: PatchEmbed 후 해상도
+        self.patches_resolution = [patches_resolution_after_embed]
+        # 이후 stages는 PatchMerging으로 2배씩 downsampling (항상 2배)
+        for i in range(1, self.num_layers):
+            prev_h, prev_w = self.patches_resolution[i-1]
+            self.patches_resolution.append((prev_h // 2, prev_w // 2))
+        
+        # 최종 feature map 해상도 업데이트
+        self.H = self.patches_resolution[-1][0]
+        self.W = self.patches_resolution[-1][1]
+        
+        # 각 layer의 해상도 업데이트
         for i_layer, layer in enumerate(self.layers):
-            layer.update_resolution(
-                H // (2 ** (i_layer + 1)),
-                W // (2 ** (i_layer + 1))
-            )
+            # BasicLayer.update_resolution은 blocks가 처리할 해상도 (downsample 후)를 받음
+            # 즉, patches_resolution[i_layer]를 전달
+            blocks_h, blocks_w = self.patches_resolution[i_layer]
+            layer.update_resolution(blocks_h, blocks_w)
 
 def create_encoder(**kwargs):
     """

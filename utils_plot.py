@@ -149,7 +149,7 @@ def save_snr_test_results(results, save_dir, args, logger, num_chunks=None):
         'args': {
             'channel_type': args.channel_type,
             'testset': args.testset,
-            'progressive_mode': args.progressive_mode,
+            'learning_mode': args.learning_mode,
             'packet_size': args.packet_size,
             'num_chunks': num_chunks
         },

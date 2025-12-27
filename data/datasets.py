@@ -160,7 +160,7 @@ def get_loader(args, config):
     train_loader = DataLoader(dataset=train_dataset,
                               batch_size=config.batch_size,
                               shuffle=True,
-                              num_workers=4,
+                              num_workers=config.num_workers,
                               pin_memory=True,
                               worker_init_fn=worker_init_fn_seed,
                               drop_last=True)
@@ -169,7 +169,7 @@ def get_loader(args, config):
     test_loader = DataLoader(dataset=test_dataset,
                              batch_size=1, 
                              shuffle=False,
-                             num_workers=4,
+                             num_workers=config.num_workers,
                              pin_memory=True)
 
     return train_loader, test_loader

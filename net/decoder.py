@@ -33,12 +33,11 @@ class BasicLayer(nn.Module):
         qk_scale (float | None): QK scale
         norm_layer: Normalization 레이어
         upsample: Upsampling 레이어 (PatchReverseMerging)
-        use_ssf (bool): SSF 사용 여부
         use_checkpoint (bool): Gradient checkpointing 사용 여부
     """
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None,
-                 norm_layer=nn.LayerNorm, upsample=None, use_ssf=True, use_checkpoint=False):
+                 norm_layer=nn.LayerNorm, upsample=None, use_checkpoint=False):
 
         super().__init__()
         self.dim = dim
@@ -57,8 +56,7 @@ class BasicLayer(nn.Module):
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
-                norm_layer=norm_layer,
-                use_ssf=use_ssf
+                norm_layer=norm_layer
             )
             for i in range(depth)
         ])
@@ -135,6 +133,7 @@ class SwinJSCC_Decoder(nn.Module):
     Args:
         img_size (tuple[int]): 복원 이미지의 최종 해상도 (예: (256, 256))
         embed_dims (list[int]): 각 stage의 채널 차원 리스트 (예: [320, 256, 192, 128])
+        patch_embed_size (int): PatchEmbed의 patch 크기. Default: 2
         depths (list[int]): 각 stage의 Swin Transformer block 깊이 (예: [2, 6, 2, 2])
         num_heads (list[int]): 각 stage의 attention head 수
         window_size (int): Window Multi-head Self Attention의 window 크기. Default: 8
@@ -144,9 +143,7 @@ class SwinJSCC_Decoder(nn.Module):
         norm_layer: 블록에서 사용할 normalization 레이어. Default: nn.LayerNorm
         patch_norm (bool): Patch merging 후 normalization 추가 여부. Default: True
         model (str): 모델 타입 식별자 (예: 'E2E'). Default: None
-        patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 출력 채널 수 (RGB 이미지의 경우 3). Default: 3
-        use_ssf (bool): SSF 사용 여부. Default: True
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
         **kwargs: 추가 인자
     """
@@ -155,43 +152,81 @@ class SwinJSCC_Decoder(nn.Module):
                  embed_dims,
                  depths,
                  num_heads,
-                 window_size=8,
-                 mlp_ratio=4.,
+                 patch_embed_size=2,  # PatchEmbed의 patch 크기 (기본값 2)
+                 window_size = 8,  # Can be int or list[int]
+                 mlp_ratio = 4.,
                  qkv_bias=True,
                  qk_scale=None,
                  norm_layer=nn.LayerNorm,
                  patch_norm=True,
                  model=None,
-                 patch_size=2,
                  in_chans=3,
-                 use_ssf=True,
                  use_checkpoint=False,
                  **kwargs):
         super().__init__()
-
         self.num_layers = len(depths)
         self.embed_dims = embed_dims
-        self.H = img_size[0]
-        self.W = img_size[1]
-        self.patches_resolution = (img_size[0] // 2 ** len(depths), img_size[1] // 2 ** len(depths))
-        self.use_ssf = use_ssf
+        self.patch_embed_size = patch_embed_size  # encoder와 동일하게 저장
+        
+        # Decoder는 encoder의 최종 feature map 해상도부터 시작
+        # encoder 최종 해상도 = img_size // patch_embed_size // (2 ** (num_layers - 1))
+        encoder_final_h = img_size[0] // patch_embed_size // (2 ** (self.num_layers - 1))
+        encoder_final_w = img_size[1] // patch_embed_size // (2 ** (self.num_layers - 1))
+        
+        # Decoder의 patches_resolution: 각 stage의 blocks가 처리할 해상도 (upsample 전)
+        # Decoder의 BasicLayer: blocks 처리 후 upsample으로 2배 upsampling
+        # 
+        # Stage 0 (첫 번째 stage, encoder 최종 해상도): encoder_final
+        # Stage 1: Stage 0 * 2
+        # Stage 2: Stage 1 * 2
+        # ...
+        # Stage N-1: encoder_final * (2 ** (num_layers - 1)) = img_size // patch_embed_size
+        self.patches_resolution = []
+        for i in range(self.num_layers):
+            h = encoder_final_h * (2 ** i)
+            w = encoder_final_w * (2 ** i)
+            self.patches_resolution.append((h, w))
+        
+        # 최종 출력 해상도 = 마지막 layer의 upsample 후 해상도
+        # = patches_resolution[-1] * 2
+        # = (img_size // patch_embed_size) * 2
+        # 
+        # 일반적으로 patch_embed_size = 2이므로 최종 출력 = img_size
+        # 하지만 patch_embed_size != 2인 경우를 대비해 실제 계산값 사용
+        if len(self.patches_resolution) > 0:
+            self.H = self.patches_resolution[-1][0] * 2
+            self.W = self.patches_resolution[-1][1] * 2
+        else:
+            self.H = img_size[0]
+            self.W = img_size[1]
         self.use_checkpoint = use_checkpoint
 
+        # Handle window_size: can be int (single value) or list (per stage)
+        if isinstance(window_size, (list, tuple)):
+            if len(window_size) != self.num_layers:
+                raise ValueError(f"window_size list length ({len(window_size)}) must match num_layers ({self.num_layers})")
+            window_sizes = window_size
+        else:
+            window_sizes = [window_size] * self.num_layers
+        
         # 1. Reconstruction Layers
+        # Decoder의 BasicLayer: blocks 처리 후 upsample 수행
+        # input_resolution은 blocks가 처리할 해상도 (upsample 전)
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
+            # 각 layer의 blocks가 처리할 해상도 (upsample 전)
+            blocks_h, blocks_w = self.patches_resolution[i_layer]
+            
             layer = BasicLayer(dim=int(embed_dims[i_layer]),
                                out_dim=int(embed_dims[i_layer + 1]) if (i_layer < self.num_layers - 1) else 3,
-                               input_resolution=(self.patches_resolution[0] * (2 ** i_layer),
-                                                 self.patches_resolution[1] * (2 ** i_layer)),
+                               input_resolution=(blocks_h, blocks_w),
                                depth=depths[i_layer],
                                num_heads=num_heads[i_layer],
-                               window_size=window_size,
+                               window_size=window_sizes[i_layer],
                                mlp_ratio=mlp_ratio,
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                upsample=PatchReverseMerging,
-                               use_ssf = self.use_ssf,
                                use_checkpoint = self.use_checkpoint) 
             self.layers.append(layer)
             print("Decoder ", layer.extra_repr())
@@ -235,18 +270,37 @@ class SwinJSCC_Decoder(nn.Module):
         입력 해상도 변경 시 내부 레이어들의 해상도를 업데이트합니다.
         
         Args:
-            H (int): 새로운 높이
-            W (int): 새로운 너비
+            H (int): 새로운 높이 (encoder의 최종 feature map 해상도)
+            W (int): 새로운 너비 (encoder의 최종 feature map 해상도)
         """
-        self.H = H * (2 ** len(self.layers))
-        self.W = W * (2 ** len(self.layers))
-        self.patches_resolution = (H, W)
+        # Decoder의 patches_resolution 업데이트
+        # 각 stage는 encoder 최종 해상도부터 2배씩 증가
+        self.patches_resolution = []
+        for i in range(self.num_layers):
+            h = H * (2 ** i)
+            w = W * (2 ** i)
+            self.patches_resolution.append((h, w))
         
+        # 최종 출력 해상도 = 마지막 layer의 upsample 후 해상도
+        # = patches_resolution[-1] * 2
+        # patches_resolution[-1] = encoder_final * (2 ** (num_layers - 1))
+        # = (img_size // patch_embed_size // (2 ** (num_layers - 1))) * (2 ** (num_layers - 1))
+        # = img_size // patch_embed_size
+        # 최종 출력 = (img_size // patch_embed_size) * 2
+        # 
+        # 최종 출력 해상도 = patches_resolution[-1] * 2
+        if len(self.patches_resolution) > 0:
+            self.H = self.patches_resolution[-1][0] * 2
+            self.W = self.patches_resolution[-1][1] * 2
+        else:
+            # patches_resolution이 없으면 encoder 최종 해상도에서 num_layers만큼 2배씩 upsampling
+            self.H = H * (2 ** self.num_layers)
+            self.W = W * (2 ** self.num_layers)
+        
+        # 각 layer의 해상도 업데이트
         for i_layer, layer in enumerate(self.layers):
-            layer.update_resolution(
-                H * (2 ** i_layer),
-                W * (2 ** i_layer)
-            )
+            blocks_h, blocks_w = self.patches_resolution[i_layer]
+            layer.update_resolution(blocks_h, blocks_w)
 
     @torch.jit.ignore
     def no_weight_decay(self):

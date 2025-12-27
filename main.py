@@ -6,7 +6,7 @@ Main entry point
 
 from data.datasets import get_loader
 from config import setup_argument_parser, Config
-from model_utils import get_use_ssf, setup_model, setup_optimizer_and_scheduler, initialize_alm_parameters
+from model_utils import setup_model, setup_optimizer_and_scheduler
 from train import train_model
 from test import run_test_mode
 from utils import seed_torch, logger_configuration
@@ -18,9 +18,8 @@ def main():
     parser = setup_argument_parser()
     args = parser.parse_args()
     
-    # Determine SSF usage and create config
-    use_ssf = get_use_ssf(args.progressive_mode)
-    config = Config(args, use_ssf=use_ssf)
+    # Create config
+    config = Config(args)
     
     # Initialize
     seed_torch(config.seed)
@@ -36,9 +35,8 @@ def main():
     # Training or test mode
     if args.training:
         optimizer, scheduler = setup_optimizer_and_scheduler(net, config)
-        lambda_l, rho, prev_h_norm, _ = initialize_alm_parameters(args, config)
         train_model(args, net, optimizer, scheduler, train_loader, val_loader,
-                   config, lambda_l, rho, prev_h_norm, logger)
+                   config, logger)
     else:
         run_test_mode(args, net, val_loader, config, logger)
 

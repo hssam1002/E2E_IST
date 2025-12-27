@@ -304,7 +304,6 @@ class PatchReverseMerging4x(nn.Module):
         flops += (H * 2) * (W * 2) * self.dim // 4 * self.dim
         return flops
 
-
 class PatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
@@ -341,19 +340,3 @@ class PatchEmbed(nn.Module):
         if self.norm is not None:
             flops += Ho * Wo * self.embed_dim
         return flops
-
-class SSF(nn.Module):
-    """
-    [Scale and Shift Feature]
-    Paper: "Scaling and Shifting Your Features: A New Baseline for Efficient Model Tuning"
-    Equation: y = gamma * x + beta
-    """
-    def __init__(self, dim):
-        super().__init__()
-        # 초기값: gamma(scale)=1, beta(shift)=0 (Identity와 동일하게 시작)
-        self.scale = nn.Parameter(torch.ones(1, 1, dim))
-        self.shift = nn.Parameter(torch.zeros(1, 1, dim))
-
-    def forward(self, x):
-        # x: (B, L, C)
-        return x * self.scale + self.shift

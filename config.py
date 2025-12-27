@@ -14,12 +14,7 @@ DEFAULT_TOTAL_EPOCHS = 10000
 DEFAULT_PRINT_STEP = 100
 DEFAULT_SAVE_MODEL_FREQ = 20
 DEFAULT_BATCH_SIZE_PER_GPU = 8
-
-# ALM hyperparameters
-DEFAULT_RHO_INIT = 0.001
-DEFAULT_RHO_GAMMA = 1.025
-DEFAULT_RHO_MAX = 1.0
-DEFAULT_ZETA = 0.8
+DEFAULT_PACKET_SIZE = 16  # Default packet size for progressive transmission
 
 
 def setup_argument_parser():
@@ -83,37 +78,98 @@ def setup_argument_parser():
         help='Training SNR (dB)'
     )
     
-    # Progressive Strategy
+    # Learning Strategy
     parser.add_argument(
-        '--alpha_mode', 
+        '--learning_mode', 
         type=str, 
-        default='exponential',
-        choices=['linear', 'inverse', 'square', 'exponential', 'uniform', 'base'],
-        help='Progressive weights mode (only used for alm, adaptive-alm modes)'
-    )
-    parser.add_argument(
-        '--progressive_mode', 
-        type=str, 
-        default='alm',
-        choices=['off', 'alm', 'adaptive-alm', 'adaptive-mrl', 'mrl', 'rand_mask_1', 'rand_mask_2'],
-        help='Progressive mode strategy'
-    )
-    parser.add_argument(
-        '--packet_size', 
-        type=int, 
-        default=32, 
-        help='Number of features per transmission step (F)'
+        default='rand_mask_2',
+        choices=['non-progressive', 'rand_mask_1', 'rand_mask_2'],
+        help='Learning mode strategy'
     )
     
-    # Adaptive / SSF Settings
+    # Model Architecture Settings
+    # Default trial (1)
+    # Embed: 128, 192, 256, 320
+    # patch_size: 2, 2, 2, 2
+    # Num_heads: 4, 6, 8, 10
+    # Depths: 2, 2, 6, 2
+    # Window_size: 8, 8, 8, 8
+
+    # Default trial (2)
+    # Embed: 256, 256, 256, 256
+    # patch_size: 8, 2, 2, 2
+    # Num_heads: 4, 4, 4, 4
+    # Depths: 2, 2, 4, 2
+    # Window_size: 32, 16, 8, 4
+
     parser.add_argument(
-        '--ssf_target', 
-        type=str, 
-        default='both', 
-        choices=['enc', 'dec', 'both'],
-        help='SSF activation location for adaptive mode'
+        '--emb_dim',
+        type=str,
+        default='128,192,256,320',
+        help='Embedding dimensions for encoder stages (comma-separated). Decoder uses reverse order.'
     )
-    
+    parser.add_argument(
+        '--patch_embed_size',
+        type=int,
+        default=2,
+        help='Patch size for PatchEmbed (initial embedding layer). PatchMerging stages always use 2x downsampling. Default: 2'
+    )
+    parser.add_argument(
+        '--num_heads',
+        type=str,
+        default='4,6,8,10',
+        help='Number of attention heads for encoder stages (comma-separated). Decoder uses reverse order.'
+    )
+    parser.add_argument(
+        '--depths',
+        type=str,
+        default='2,2,6,2',
+        help='Depths (number of blocks) for encoder stages (comma-separated). If None, uses default [2,2,6,2] for 4 stages or [2]*N for N stages. Decoder uses reverse order.'
+    )
+    parser.add_argument(
+        '--window_size',
+        type=str,
+        default='8,8,8,8',
+        help='Window size for Swin Transformer attention (comma-separated for each stage). If None, uses single value 8 for all stages. Default: None'
+    )
+    parser.add_argument(
+        '--use_checkpoint',
+        action='store_true',
+        help='Enable gradient checkpointing to save memory (slower but uses less GPU memory)'
+    )
+
+    parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=None,
+        help='Batch size per GPU. If None, uses default (8). Total batch size = batch_size * num_gpus'
+    )
+    parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=8,
+        help='Number of data loading workers. Default: 8'
+    )
+    parser.add_argument(
+        '--gradient_accumulation_steps',
+        type=int,
+        default=1,
+        help='Number of gradient accumulation steps. Effective batch size = batch_size * gradient_accumulation_steps. Default: 1'
+    )
+    parser.add_argument(
+        '--packet_size',
+        type=int,
+        default=DEFAULT_PACKET_SIZE,
+        help='Packet size for progressive transmission. Default: 16'
+    )
+ 
+    # Loss Function Settings
+    parser.add_argument(
+        '--loss_weights',
+        type=str,
+        default='1.0,0.1',
+        help='Loss weights for [MSE, MS-SSIM] (comma-separated). Default: 1.0,1.0'
+    )
     # Test Mode Settings
     parser.add_argument(
         '--model_dir',
@@ -127,24 +183,15 @@ def setup_argument_parser():
         default=None,
         help='Comma-separated SNR values for SNR performance test (e.g., "-5,0,5,10,15,20"). If provided, performs SNR sweep test.'
     )
-    parser.add_argument(
-        '--test_snr_chunk',
-        type=int,
-        default=None,
-        help='Chunk number to measure for SNR test. If None, measures at final chunk.'
-    )
-    
     return parser
-
 
 class Config:
     """Configuration class for training and model settings"""
     
-    def __init__(self, args, use_ssf=False):
+    def __init__(self, args):
         """
         Args:
             args: Parsed command-line arguments
-            use_ssf: Whether to use SSF (Scale & Shift Feature)
         """
         # Basic settings
         self.seed = DEFAULT_SEED
@@ -166,13 +213,13 @@ class Config:
         if is_test_mode:
             self.workdir = (
                 f'{self.base_save_path}/'
-                f'test_{args.testset}_{args.progressive_mode}_packet{args.packet_size}/'
+                f'test_{args.testset}_{args.learning_mode}/'
                 f'{timestamp}'
             )
         else:
             self.workdir = (
                 f'{self.base_save_path}/'
-                f'{args.trainset}_SNR{args.train_snr}_{args.alpha_mode}_{args.progressive_mode}/'
+                f'{args.trainset}_SNR{args.train_snr}_{args.learning_mode}/'
                 f'{timestamp}'
             )
         
@@ -183,39 +230,67 @@ class Config:
         
         # Training hyperparameters
         self.learning_rate = args.lr
-        self.tot_epoch = DEFAULT_TOTAL_EPOCHS
+        self.lr = args.lr  # Alias for compatibility
+        self.tot_epoch = 5000  # Fixed to 5000 as requested
         self.print_step = DEFAULT_PRINT_STEP
         self.save_model_freq = DEFAULT_SAVE_MODEL_FREQ
-        self.batch_size = DEFAULT_BATCH_SIZE_PER_GPU * torch.cuda.device_count()
+        # Batch size
+        batch_size_per_gpu = args.batch_size if args.batch_size is not None else DEFAULT_BATCH_SIZE_PER_GPU
+        self.batch_size = batch_size_per_gpu * torch.cuda.device_count()
+        self.num_workers = args.num_workers
+        self.gradient_accumulation_steps = args.gradient_accumulation_steps
+        self.packet_size = args.packet_size
         
-        # Model settings
+        # Parse embedding dimensions and num_heads from arguments
+        embed_dims = [int(x.strip()) for x in args.emb_dim.split(',')]
+        num_heads = [int(x.strip()) for x in args.num_heads.split(',')]
+        
+        if len(embed_dims) != len(num_heads):
+            raise ValueError(f"emb_dim and num_heads must have the same length. Got {len(embed_dims)} and {len(num_heads)}")
+        
+        # patch_embed_size: PatchEmbed에만 사용 (기본값 2)
+        patch_embed_size = args.patch_embed_size
+        
+        # Parse depths from arguments
+        depths = [int(x.strip()) for x in args.depths.split(',')]
+        if len(depths) != len(embed_dims):
+            raise ValueError(f"depths must have the same length as emb_dim. Got {len(depths)} and {len(embed_dims)}")
+        
+        # Parse window_size from arguments
+        window_sizes = [int(x.strip()) for x in args.window_size.split(',')]
+        if len(window_sizes) != len(embed_dims):
+            raise ValueError(f"window_size must have the same length as emb_dim. Got {len(window_sizes)} and {len(embed_dims)}")
+        
+        # Model settings (window_size는 stage별로 다를 수 있으므로 common_kwargs에서 제외)
         common_kwargs = dict(
             img_size=(256, 256),
-            patch_size=2,
-            in_chans=3,
-            window_size=8,
-            mlp_ratio=4.0,
-            qkv_bias=True,
-            qk_scale=None,
-            norm_layer=nn.LayerNorm,
-            patch_norm=True,
+            in_chans = 3,
+            mlp_ratio = 4.0,
+            qkv_bias = True,
+            qk_scale = None,
+            norm_layer = nn.LayerNorm,
+            patch_norm = True,
             model='E2E',
-            use_ssf=use_ssf,
-            use_checkpoint=True
+            use_checkpoint=args.use_checkpoint
         )
         
-        # Encoder settings: [128, 192, 256, 320] channels, [2, 2, 6, 2] depths
+        # Encoder settings: user-specified parameters (window_size는 list로 전달)
         self.encoder_kwargs = dict(
-            embed_dims=[128, 192, 256, 320],
-            depths=[2, 2, 6, 2],
-            num_heads=[4, 6, 8, 10],
+            embed_dims=embed_dims,
+            patch_embed_size=patch_embed_size,  # PatchEmbed에만 사용
+            depths=depths,
+            num_heads=num_heads,
+            window_size=window_sizes,  # List of window sizes for each stage
             **common_kwargs
         )
         
-        # Decoder settings: symmetric to encoder
+        # Decoder settings: symmetric to encoder (reverse order)
+        # Decoder는 PatchEmbed를 사용하지 않으므로 patch_embed_size는 무시됨
         self.decoder_kwargs = dict(
-            embed_dims=[320, 256, 192, 128],
-            depths=[2, 6, 2, 2],
-            num_heads=[10, 8, 6, 4],
+            embed_dims=list(reversed(embed_dims)),
+            patch_embed_size=patch_embed_size,  # Decoder에서는 사용되지 않지만 호환성을 위해 포함
+            depths=list(reversed(depths)),
+            num_heads=list(reversed(num_heads)),
+            window_size=list(reversed(window_sizes)),  # Reverse order for decoder
             **common_kwargs
         )
