@@ -15,11 +15,8 @@ DEFAULT_PRINT_STEP = 100
 DEFAULT_SAVE_MODEL_FREQ = 20
 DEFAULT_BATCH_SIZE_PER_GPU = 8
 
-# ALM hyperparameters
-DEFAULT_RHO_INIT = 0.001
-DEFAULT_RHO_GAMMA = 1.025
-DEFAULT_RHO_MAX = 1.0
-DEFAULT_ZETA = 0.8
+# Packet Size
+DEFAULT_PACKET_SIZE = 16
 
 
 def setup_argument_parser():
@@ -77,41 +74,25 @@ def setup_argument_parser():
         help='Channel model type'
     )
     parser.add_argument(
-        '--train_snr', 
-        type=int, 
-        default=10, 
+        '--train_snr_list', 
+        type=str, 
+        default='-10,-5, 0, 5, 10', 
         help='Training SNR (dB)'
     )
     
     # Progressive Strategy
     parser.add_argument(
-        '--alpha_mode', 
-        type=str, 
-        default='exponential',
-        choices=['linear', 'inverse', 'square', 'exponential', 'uniform'],
-        help='Progressive weights mode'
-    )
-    parser.add_argument(
         '--progressive_mode', 
         type=str, 
-        default='alm',
-        choices=['off', 'alm', 'adaptive-alm', 'adaptive-mrl', 'mrl', 'rand_mask_1', 'rand_mask_2'],
+        default='rand_mask_2',
+        choices=['off', 'rand_mask_1', 'rand_mask_2'],
         help='Progressive mode strategy'
     )
     parser.add_argument(
         '--packet_size', 
         type=int, 
-        default=32, 
+        default = DEFAULT_PACKET_SIZE, 
         help='Number of features per transmission step (F)'
-    )
-    
-    # Adaptive / SSF Settings
-    parser.add_argument(
-        '--ssf_target', 
-        type=str, 
-        default='both', 
-        choices=['enc', 'dec', 'both'],
-        help='SSF activation location for adaptive mode'
     )
     
     # Test Mode Settings
@@ -140,11 +121,10 @@ def setup_argument_parser():
 class Config:
     """Configuration class for training and model settings"""
     
-    def __init__(self, args, use_ssf=False):
+    def __init__(self, args):
         """
         Args:
             args: Parsed command-line arguments
-            use_ssf: Whether to use SSF (Scale & Shift Feature)
         """
         # Basic settings
         self.seed = DEFAULT_SEED
@@ -160,6 +140,12 @@ class Config:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.filename = timestamp
         
+        # Parse train_snr_list
+        if hasattr(args, 'train_snr_list') and args.train_snr_list:
+            self.train_snr_list = [float(x.strip()) for x in args.train_snr_list.split(',')]
+        else:
+            self.train_snr_list = [10.0]  # Default single SNR
+        
         # Check if test mode
         is_test_mode = not hasattr(args, 'training') or not args.training
         
@@ -170,9 +156,10 @@ class Config:
                 f'{timestamp}'
             )
         else:
+            snr_str = f"SNR{min(self.train_snr_list):.0f}to{max(self.train_snr_list):.0f}"
             self.workdir = (
                 f'{self.base_save_path}/'
-                f'{args.trainset}_SNR{args.train_snr}_{args.alpha_mode}_{args.progressive_mode}/'
+                f'{args.trainset}_{snr_str}_{args.progressive_mode}/'
                 f'{timestamp}'
             )
         
@@ -200,7 +187,6 @@ class Config:
             norm_layer=nn.LayerNorm,
             patch_norm=True,
             model='E2E',
-            use_ssf=use_ssf,
             use_checkpoint=True
         )
         

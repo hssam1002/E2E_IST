@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from utils import AverageMeter
-from loss.distortion import MS_SSIM
+from pytorch_msssim import ms_ssim
 from model_utils import load_weights, find_model_path
 from utils_plot import save_snr_test_results
 
@@ -41,36 +41,28 @@ def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
             f"====== Validation Results (SNR {val_snr} dB), Epoch {epoch + 1} ======"
         )
     
-    # For 'off' mode, test both sequential and variance-sorted strategies
+    # For 'off' mode, test sequential transmission
     if args.progressive_mode == 'off':
         logger.info("=" * 80)
-        logger.info("Testing 'off' mode with two transmission strategies")
+        logger.info("Testing 'off' mode with sequential transmission")
         logger.info("=" * 80)
         
-        # 1. Sequential transmission
-        logger.info(f"\n--- Strategy 1: Sequential Transmission (Packet Size: {args.packet_size}) ---")
-        results_seq = test_off_mode(loader, net, val_snr, config, args, logger, use_variance_sorting=False)
-        
-        # 2. Variance-based sorted transmission
-        logger.info(f"\n--- Strategy 2: Variance-based Sorted Transmission (Packet Size: {args.packet_size}) ---")
-        results_var = test_off_mode(loader, net, val_snr, config, args, logger, use_variance_sorting=True)
+        # Sequential transmission
+        logger.info(f"\n--- Sequential Transmission (Packet Size: {args.packet_size}) ---")
+        results_seq = test_off_mode(loader, net, val_snr, config, args, logger)
         
         logger.info("=" * 80)
-        logger.info("Comparison Results (Chunk-by-Chunk):")
-        logger.info(f"{'Chunk':<8} | {'Sequential':<30} | {'Variance-Sorted':<30}")
-        logger.info(f"{'':8} | {'PSNR (dB)':<15} {'MS-SSIM':<15} | {'PSNR (dB)':<15} {'MS-SSIM':<15}")
+        logger.info("Chunk-by-Chunk Results:")
+        logger.info(f"{'Chunk':<8} | {'PSNR (dB)':<15} {'MS-SSIM':<15}")
         logger.info("-" * 80)
-        for chunk_num, psnr_seq, ssim_seq, psnr_var, ssim_var in zip(
+        for chunk_num, psnr, ssim in zip(
             results_seq['chunk'], 
             results_seq['psnr'], 
-            results_seq['ssim'],
-            results_var['psnr'],
-            results_var['ssim']
+            results_seq['ssim']
         ):
             logger.info(
                 f"{chunk_num:>8} | "
-                f"{psnr_seq:>14.2f} {ssim_seq:>14.4f} | "
-                f"{psnr_var:>14.2f} {ssim_var:>14.4f}"
+                f"{psnr:>14.2f} {ssim:>14.4f}"
             )
         logger.info("=" * 80)
         
@@ -81,7 +73,6 @@ def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
     num_chunks = None
     chunk_psnrs = []
     chunk_ssims = []
-    ms_ssim_module = MS_SSIM(data_range=1.0, levels=4, channel=3).to(config.device)
     
     os.makedirs(config.samples, exist_ok=True)
     
@@ -110,11 +101,11 @@ def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
                     psnr = 10 * np.log10(1.0 / mse_val.item())
                     chunk_psnrs[chunk_idx].update(psnr)
                 
-                ssim_val = ms_ssim_module(recon_img, input_img).item()
+                ssim_val = ms_ssim(recon_img, input_img, data_range=1.0).item()
                 chunk_ssims[chunk_idx].update(ssim_val)
             
             # Save images periodically
-            if i == 10 and ((epoch + 1) % save_freq == 0):
+            if i == 5 and ((epoch + 1) % save_freq == 0):
                 orig = input_img[0].cpu().permute(1, 2, 0).numpy()
                 orig = np.clip(orig, 0, 1)
                 save_path_orig = os.path.join(
@@ -150,7 +141,7 @@ def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
     return final_psnr
 
 
-def test_off_mode(loader, net, snr, config, args, logger, use_variance_sorting=False):
+def test_off_mode(loader, net, snr, config, args, logger):
     """
     Test 'off' mode with two transmission strategies.
     Calculate chunk-by-chunk performance.
@@ -162,7 +153,6 @@ def test_off_mode(loader, net, snr, config, args, logger, use_variance_sorting=F
         config: Config object
         args: Parsed arguments
         logger: Logger object
-        use_variance_sorting (bool): Whether to use variance-based sorting
     
     Returns:
         dict: Chunk-by-chunk average PSNR, MS-SSIM dictionary
@@ -172,16 +162,15 @@ def test_off_mode(loader, net, snr, config, args, logger, use_variance_sorting=F
     num_chunks = None
     chunk_psnrs = []
     chunk_ssims = []
-    ms_ssim_module = MS_SSIM(data_range=1.0, levels=4, channel=3).to(config.device)
     
     with torch.no_grad():
         for i, input_img in enumerate(loader):
             input_img = input_img.to(config.device)
             
             if isinstance(net, nn.DataParallel):
-                results = net.module(input_img, snr, use_variance_sorting=use_variance_sorting, force_progressive=True)
+                results = net.module(input_img, snr, force_progressive=True)
             else:
-                results = net(input_img, snr, use_variance_sorting=use_variance_sorting, force_progressive=True)
+                results = net(input_img, snr, force_progressive=True)
             
             mse_list = results['mse']
             recon_list = results['recon_img']
@@ -199,7 +188,7 @@ def test_off_mode(loader, net, snr, config, args, logger, use_variance_sorting=F
                     psnr = 10 * np.log10(1.0 / mse_val.item())
                     chunk_psnrs[chunk_idx].update(psnr)
                 
-                ssim_val = ms_ssim_module(recon_img, input_img).item()
+                ssim_val = ms_ssim(recon_img, input_img, data_range=1.0).item()
                 chunk_ssims[chunk_idx].update(ssim_val)
     
     result = {
@@ -208,7 +197,6 @@ def test_off_mode(loader, net, snr, config, args, logger, use_variance_sorting=F
         'ssim': [meter.avg for meter in chunk_ssims]
     }
     
-    logger.info(f"Chunk-by-chunk results ({'Variance-sorted' if use_variance_sorting else 'Sequential'}):")
     for chunk_num, psnr, ssim in zip(result['chunk'], result['psnr'], result['ssim']):
         logger.info(f"  Chunk {chunk_num:2d}: PSNR={psnr:.2f} dB, MS-SSIM={ssim:.4f}")
     
@@ -240,8 +228,6 @@ def test_snr_performance(net, loader, config, args, logger,
         'psnr': [],
         'ssim': []
     }
-    
-    ms_ssim_module = MS_SSIM(data_range=1.0, levels=4, channel=3).to(config.device)
     
     logger.info("=" * 80)
     logger.info("SNR vs Performance Test")
@@ -283,7 +269,7 @@ def test_snr_performance(net, loader, config, args, logger,
                     psnr = 10 * np.log10(1.0 / mse_val.item())
                     psnr_avg.update(psnr)
                 
-                ssim_val = ms_ssim_module(recon_img, input_img).item()
+                ssim_val = ms_ssim(recon_img, input_img, data_range=1.0).item()
                 ssim_avg.update(ssim_val)
         
         results['snr'].append(snr)
@@ -313,11 +299,9 @@ def load_test_model(net, args, logger):
         logger: Logger object
     """
     if args.model_dir:
-        alpha_mode_for_search = args.alpha_mode if args.progressive_mode in ['alm', 'adaptive-alm'] else None
         model_path = find_model_path(
             args.model_dir,
-            args.progressive_mode,
-            alpha_mode=alpha_mode_for_search
+            args.progressive_mode
         )
         if model_path:
             logger.info(f"Loading model from: {model_path}")
@@ -328,7 +312,7 @@ def load_test_model(net, args, logger):
         else:
             logger.warning(
                 f"Model not found in {args.model_dir} for "
-                f"mode={args.progressive_mode}, alpha_mode={args.alpha_mode}. "
+                f"mode={args.progressive_mode} "
                 f"Using current model weights."
             )
 

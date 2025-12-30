@@ -33,12 +33,11 @@ class BasicLayer(nn.Module):
         qk_scale (float | None): QK scale
         norm_layer: Normalization 레이어
         upsample: Upsampling 레이어 (PatchReverseMerging)
-        use_ssf (bool): SSF 사용 여부
         use_checkpoint (bool): Gradient checkpointing 사용 여부
     """
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None,
-                 norm_layer=nn.LayerNorm, upsample=None, use_ssf=True, use_checkpoint=False):
+                 norm_layer=nn.LayerNorm, upsample=None, use_checkpoint=False):
 
         super().__init__()
         self.dim = dim
@@ -57,8 +56,7 @@ class BasicLayer(nn.Module):
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
-                norm_layer=norm_layer,
-                use_ssf=use_ssf
+                norm_layer=norm_layer
             )
             for i in range(depth)
         ])
@@ -146,7 +144,6 @@ class SwinJSCC_Decoder(nn.Module):
         model (str): 모델 타입 식별자 (예: 'E2E'). Default: None
         patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 출력 채널 수 (RGB 이미지의 경우 3). Default: 3
-        use_ssf (bool): SSF 사용 여부. Default: True
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
         **kwargs: 추가 인자
     """
@@ -164,7 +161,6 @@ class SwinJSCC_Decoder(nn.Module):
                  model=None,
                  patch_size=2,
                  in_chans=3,
-                 use_ssf=True,
                  use_checkpoint=False,
                  **kwargs):
         super().__init__()
@@ -174,7 +170,6 @@ class SwinJSCC_Decoder(nn.Module):
         self.H = img_size[0]
         self.W = img_size[1]
         self.patches_resolution = (img_size[0] // 2 ** len(depths), img_size[1] // 2 ** len(depths))
-        self.use_ssf = use_ssf
         self.use_checkpoint = use_checkpoint
 
         # 1. Reconstruction Layers
@@ -191,7 +186,6 @@ class SwinJSCC_Decoder(nn.Module):
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                upsample=PatchReverseMerging,
-                               use_ssf = self.use_ssf,
                                use_checkpoint = self.use_checkpoint) 
             self.layers.append(layer)
             print("Decoder ", layer.extra_repr())

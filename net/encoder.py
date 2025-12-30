@@ -30,11 +30,10 @@ class SwinTransformerBlock(nn.Module):
         qk_scale (float | None, optional): 기본 qk scale (head_dim ** -0.5) 오버라이드
         act_layer (nn.Module, optional): Activation 함수. Default: nn.GELU
         norm_layer (nn.Module, optional): Normalization 레이어. Default: nn.LayerNorm
-        use_ssf (bool): SSF(Scale & Shift Feature) 레이어 활성화 여부 (Adaptation용)
     """
     def __init__(self, dim, input_resolution, num_heads, window_size=7, shift_size=0,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, act_layer=nn.GELU,
-                 norm_layer=nn.LayerNorm, use_ssf=False):
+                 norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
@@ -42,7 +41,6 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        self.use_ssf = use_ssf
 
         # Window size 조정 (input resolution보다 크면 shift 안 함)
         if min(self.input_resolution) <= self.window_size:
@@ -53,27 +51,15 @@ class SwinTransformerBlock(nn.Module):
         # --- 1. Attention Part ---
         self.norm1 = norm_layer(dim)
 
-        # [SSF] After norm1
-        self.ssf1 = SSF(dim) if use_ssf else nn.Identity()
-
         self.attn = WindowAttention(
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale)
-        
-        # [SSF] After attention
-        self.ssf2 = SSF(dim) if use_ssf else nn.Identity()
 
         # --- 2. MLP Part ---
         self.norm2 = norm_layer(dim)
 
-        # [SSF] After norm2
-        self.ssf3 = SSF(dim) if use_ssf else nn.Identity()
-
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer)
-        
-        # [SSF] After MLP
-        self.ssf4 = SSF(dim) if use_ssf else nn.Identity()
 
         # --- 3. Attention Mask Setup (기존과 동일) ---
         if self.shift_size > 0:
@@ -109,7 +95,6 @@ class SwinTransformerBlock(nn.Module):
 
         # 1. Norm -> [SSF] -> Window Attention -> [SSF]
         x = self.norm1(x)
-        if self.use_ssf: x = self.ssf1(x) # SSF 적용
 
         x = x.view(B, H, W, C)
 
@@ -139,19 +124,14 @@ class SwinTransformerBlock(nn.Module):
             x = shifted_x
         x = x.view(B, L, C)
 
-        if self.use_ssf: x = self.ssf2(x) # SSF 적용
-
         # FFN (Add Residual)
         x = shortcut + x
 
         # 2. Norm -> [SSF] -> MLP -> [SSF]
         shortcut = x
         x = self.norm2(x)
-        if self.use_ssf: x = self.ssf3(x) # SSF 적용
-        
         x = self.mlp(x)
-        if self.use_ssf: x = self.ssf4(x) # SSF 적용
-        
+
         x = shortcut + x
 
         return x
@@ -221,12 +201,11 @@ class BasicLayer(nn.Module):
         qk_scale (float | None): QK scale
         norm_layer: Normalization 레이어
         downsample: Downsampling 레이어 (PatchMerging)
-        use_ssf (bool): SSF 사용 여부
         use_checkpoint (bool): Gradient checkpointing 사용 여부 (메모리 절약)
     """
     def __init__(self, dim, out_dim, input_resolution, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, norm_layer=nn.LayerNorm,
-                 downsample=None, use_ssf=False, use_checkpoint=False):
+                 downsample=None, use_checkpoint=False):
 
         super().__init__()
         self.dim = dim
@@ -245,8 +224,7 @@ class BasicLayer(nn.Module):
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
-                norm_layer=norm_layer,
-                use_ssf=use_ssf
+                norm_layer=norm_layer
             )
             for i in range(depth)
         ])
@@ -332,7 +310,6 @@ class SwinJSCC_Encoder(nn.Module):
         model (str): 모델 타입 식별자 (예: 'E2E'). Default: None
         patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 입력 채널 수 (RGB 이미지의 경우 3). Default: 3
-        use_ssf (bool): SSF 사용 여부. Default: False
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
         **kwargs: 추가 인자
     """
@@ -350,7 +327,6 @@ class SwinJSCC_Encoder(nn.Module):
                  model=None,
                  patch_size=2,
                  in_chans=3,
-                 use_ssf=False,
                  use_checkpoint=False,
                  **kwargs):
         super().__init__()
@@ -364,7 +340,6 @@ class SwinJSCC_Encoder(nn.Module):
         self.H = img_size[0] // (2 ** self.num_layers)
         self.W = img_size[1] // (2 ** self.num_layers)
         self.patch_embed = PatchEmbed(img_size, 2, 3, embed_dims[0])
-        self.use_ssf = use_ssf
         self.use_checkpoint = use_checkpoint
         
         # build layers
@@ -381,7 +356,6 @@ class SwinJSCC_Encoder(nn.Module):
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                downsample=PatchMerging if i_layer != 0 else None,
-                               use_ssf = self.use_ssf,
                                use_checkpoint = self.use_checkpoint)
             print("Encoder ", layer.extra_repr())
             self.layers.append(layer)

@@ -10,5 +10,3 @@ python main.py \
     --trainset DIV2K \
     --testset Kodak \
     --channel_type noiseless \
-    --alpha_mode base \
-    --train_snr 10

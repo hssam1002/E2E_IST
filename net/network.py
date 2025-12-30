@@ -29,10 +29,6 @@ class E2E_SwinJSCC(nn.Module):
     
     Progressive Mode:
     - 'off': 전체 특징을 한 번에 전송 (Non-progressive 모드)
-    - 'alm': 단계적으로 특징을 전송 (ALM 기반)
-    - 'adaptive-alm': SSF + ALM 기반 적응형 fine-tuning
-    - 'adaptive-mrl': SSF + MRL 기반 적응형 fine-tuning
-    - 'mrl': 모든 단계의 loss 합산
     - 'rand_mask_1', 'rand_mask_2': 랜덤 마스킹 기반 학습
     """
     def __init__(self, args, config):
@@ -86,14 +82,13 @@ class E2E_SwinJSCC(nn.Module):
         x_norm = x / torch.sqrt(power)
         return x_norm
 
-    def forward(self, input_image, snr, use_variance_sorting=False, force_progressive=False):
+    def forward(self, input_image, snr, force_progressive=False):
         """
         Forward pass.
         
         Args:
             input_image (torch.Tensor): 입력 이미지 (B, 3, H, W)
             snr (float): Signal-to-Noise Ratio (dB)
-            use_variance_sorting (bool): Variance 기반 채널 정렬 사용 여부 (off 모드에서만)
             force_progressive (bool): 모든 mode에서 chunk-by-chunk progressive decoding 강제 (validate용)
         
         Returns:
@@ -119,29 +114,6 @@ class E2E_SwinJSCC(nn.Module):
         total_packets = (C_total + self.packet_size - 1) // self.packet_size
         random_idx = np.random.randint(0, total_packets)
         
-        # Chunk별 variance 계산 및 전송 순서 결정 (variance sorting용)
-        chunk_transmission_order = None
-        if use_variance_sorting and (self.args.progressive_mode == 'off' or force_progressive):
-            # 각 batch별, chunk별 variance 계산
-            # feat_all: (B, Seq, C_total)
-            chunk_variances = []  # (B, num_chunks)
-            
-            for chunk_idx in range(total_packets):
-                c_start = chunk_idx * self.packet_size
-                c_end = min(c_start + self.packet_size, C_total)
-                # 각 chunk의 채널들 추출
-                chunk_feat = feat_all[:, :, c_start:c_end]  # (B, Seq, packet_size)
-                # 각 채널별 variance 계산 (Seq dimension에 대해)
-                channel_vars = torch.var(chunk_feat, dim=1)  # (B, packet_size) - 각 채널별 variance
-                # 채널 variance의 합을 chunk variance로 사용
-                chunk_var = torch.sum(channel_vars, dim=1)  # (B,) - 각 batch별 chunk variance
-                chunk_variances.append(chunk_var)
-            
-            # (B, num_chunks)
-            chunk_variances = torch.stack(chunk_variances, dim=1)
-            # 각 batch별로 variance가 높은 chunk 순서대로 정렬 (내림차순)
-            chunk_transmission_order = torch.argsort(chunk_variances, dim=1, descending=True)  # (B, num_chunks)
-        
         # 전력 정규화 및 채널 통과 (정렬 없이 원본 사용)
         tx_norm = self.power_normalize(feat_all)
         rx_all = self.channel(tx_norm, snr, avg_pwr=True)
@@ -160,44 +132,20 @@ class E2E_SwinJSCC(nn.Module):
             mse_losses = []
             recon_imgs = []
 
-            # Chunk별 전송 순서 결정 (variance sorting이 사용된 경우)
-            if use_variance_sorting and chunk_transmission_order is not None:
-                # chunk_transmission_order: (B, num_chunks) - 각 batch별 chunk 전송 순서
-                # 각 batch별로 variance 순서대로 전송
-                for step in range(total_packets):
-                    # 각 batch별로 이번 step에 전송할 chunk 인덱스
-                    chunk_idx_to_send = chunk_transmission_order[:, step]  # (B,)
-                    # 각 batch별로 해당 chunk의 원래 위치 계산
-                    chunk_starts = chunk_idx_to_send * self.packet_size  # (B,)
-                    chunk_ends = torch.min(chunk_starts + self.packet_size, torch.tensor(C_total, device=feat_all.device))  # (B,)
-                    
-                    # Batch별로 다른 chunk를 전송하므로 loop 필요
-                    for b in range(B):
-                        c_start = chunk_starts[b].item()
-                        c_end = chunk_ends[b].item()
-                        # 원래 위치에 저장
-                        feat_received_buffer[b:b+1, :, c_start:c_end] = rx_all[b:b+1, :, c_start:c_end]
-                    
-                    # 디코딩
-                    recon = self.decoder(feat_received_buffer)
-                    mse_val = nn.MSELoss()(recon, input_image)
-                    mse_losses.append(mse_val)
-                    recon_imgs.append(recon)
-            else:
-                # 순차 전송 (원래 순서)
-                for c_idx in range(0, C_total, self.packet_size):
-                    c_start = c_idx
-                    c_end = min(c_idx + self.packet_size, C_total)
-                    
-                    # Buffer 업데이트: 새로운 패킷 추가
-                    feat_received_buffer = feat_received_buffer.clone()
-                    feat_received_buffer[:, :, c_start:c_end] = rx_all[:, :, c_start:c_end]
-                    
-                    # 디코딩
-                    recon = self.decoder(feat_received_buffer)
-                    mse_val = nn.MSELoss()(recon, input_image)
-                    mse_losses.append(mse_val)
-                    recon_imgs.append(recon)
+            # 순차 전송 (원래 순서)
+            for c_idx in range(0, C_total, self.packet_size):
+                c_start = c_idx
+                c_end = min(c_idx + self.packet_size, C_total)
+                
+                # Buffer 업데이트: 새로운 패킷 추가
+                feat_received_buffer = feat_received_buffer.clone()
+                feat_received_buffer[:, :, c_start:c_end] = rx_all[:, :, c_start:c_end]
+                
+                # 디코딩
+                recon = self.decoder(feat_received_buffer)
+                mse_val = nn.MSELoss()(recon, input_image)
+                mse_losses.append(mse_val)
+                recon_imgs.append(recon)
 
             return {
                 'mse': mse_losses,
@@ -245,38 +193,8 @@ class E2E_SwinJSCC(nn.Module):
                 'mse': [mse_partial, mse_full],
                 'recon_img': [recon_partial, recon_full]
             }
-
-        # [Slow Path] Mode: 'alm', 'adaptive-alm', 'adaptive-mrl', 'mrl'
-        # 모든 단계를 순차적으로 처리 (ALM 제어 필요)
         else:
-            feat_received_buffer = torch.zeros_like(feat_all)
-            mse_losses = []
-            recon_imgs = []
-
-            # Progressive transmission: 패킷 단위로 특징 추가
-            for c_idx in range(0, C_total, self.packet_size):
-                c_start = c_idx
-                c_end = min(c_idx + self.packet_size, C_total)
-                
-                # Buffer 업데이트: 새로운 패킷 추가
-                feat_received_buffer = feat_received_buffer.clone()
-                feat_received_buffer[:, :, c_start:c_end] = rx_all[:, :, c_start:c_end]
-                
-                # 디코딩
-                recon = self.decoder(feat_received_buffer)
-
-                # Loss 계산
-                mse_val = nn.MSELoss()(recon, input_image)
-                mse_losses.append(mse_val)
-
-                # 이미지 저장: 테스트 모드에서는 모든 단계, 학습 모드에서는 마지막 단계만
-                is_testing = (not self.training)
-                is_last_step = (c_end >= C_total)
-
-                if is_testing or is_last_step:
-                    recon_imgs.append(recon)
-
-            return {
-                'mse': mse_losses,
-                'recon_img': recon_imgs
-            }
+            raise ValueError(
+                f"Unsupported progressive_mode: {self.args.progressive_mode}. "
+                f"Supported modes: 'off', 'rand_mask_1', 'rand_mask_2'"
+            )
