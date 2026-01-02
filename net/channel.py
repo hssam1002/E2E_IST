@@ -30,6 +30,17 @@ class Channel(nn.Module):
         self.config = config
         self.chan_type = args.channel_type
         self.device = config.device
+    
+    def set_channel_type(self, channel_type):
+        """
+        채널 타입을 동적으로 변경합니다.
+        
+        Args:
+            channel_type (str): 새로운 채널 타입 ('awgn', 'rayleigh', 'noiseless')
+        """
+        if channel_type not in ['awgn', 'rayleigh', 'noiseless']:
+            raise ValueError(f"Unknown channel_type: {channel_type}")
+        self.chan_type = channel_type
 
     def gaussian_noise_layer(self, input_layer, std):
         """

@@ -34,7 +34,7 @@ def main():
     
     # Training or test mode
     if args.training:
-        optimizer, scheduler = setup_optimizer_and_scheduler(net, config)
+        optimizer, scheduler = setup_optimizer_and_scheduler(net, config, args)
         train_model(args, net, optimizer, scheduler, train_loader, val_loader,
                    config, logger)
     else:

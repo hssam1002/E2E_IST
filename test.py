@@ -12,6 +12,29 @@ from pytorch_msssim import ms_ssim
 from model_utils import load_weights, find_model_path
 from utils_plot import save_snr_test_results
 
+# Import calculate_cbr from evaluate_all_models
+def calculate_cbr(chunk_num, packet_size=256, img_size=(256, 256)):
+    """
+    Calculate Channel Bit Ratio (CBR)
+    
+    CBR = (# Chunk * 256) / (256 * 256 * 3 * 2)
+    where 2 accounts for complex channel (real + imag)
+    
+    Args:
+        chunk_num (int): Number of chunks transmitted
+        packet_size (int): Packet size (F), default 256 as per user specification
+        img_size (tuple): Image size (H, W)
+    
+    Returns:
+        float: CBR value
+    """
+    H, W = img_size
+    # User specified formula: CBR = (# Chunk * 256) / (256 * 256 * 3 * 2)
+    transmitted_bits = chunk_num * 256
+    original_bits = 256 * 256 * 3 * 2  # Fixed as per user specification
+    cbr = transmitted_bits / original_bits
+    return cbr
+
 
 def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
     """
@@ -38,7 +61,7 @@ def validate(loader, net, val_snr, epoch, config, args, logger, save_freq=20):
         )
     else:
         logger.info(
-            f"====== Validation Results (SNR {val_snr} dB), Epoch {epoch + 1} ======"
+            f"====== Validation Results (SNR {val_snr:.2f} dB), Epoch {epoch + 1} ======"
         )
     
     # For 'off' mode, test sequential transmission
@@ -203,11 +226,10 @@ def test_off_mode(loader, net, snr, config, args, logger):
     return result
 
 
-def test_snr_performance(net, loader, config, args, logger, 
-                         snr_list, num_chunks=None):
+def test_snr_performance(net, loader, config, args, logger, snr_list):
     """
-    Test performance across multiple SNR values.
-    Measure performance at specific chunk number.
+    Test performance for all (SNR, CBR) combinations.
+    Measure PSNR and MS-SSIM for each (SNR, chunk) pair.
     
     Args:
         net (nn.Module): Model to test
@@ -216,35 +238,59 @@ def test_snr_performance(net, loader, config, args, logger,
         args: Parsed arguments
         logger: Logger object
         snr_list (list): List of SNR values to test (dB)
-        num_chunks (int, optional): Chunk number to measure. None for final chunk
     
     Returns:
-        dict: Test results dictionary {'snr': [...], 'psnr': [...], 'ssim': [...]}
+        dict: Test results dictionary with structure:
+            {
+                'snr': [snr1, snr1, snr1, ..., snr2, snr2, ...],  # Flattened: one per (snr, chunk)
+                'chunk': [1, 2, 3, ..., 1, 2, 3, ...],  # Flattened: one per (snr, chunk)
+                'cbr': [cbr1, cbr2, cbr3, ..., cbr1, cbr2, ...],  # Flattened: one per (snr, chunk)
+                'psnr': [psnr for (snr1, chunk1), (snr1, chunk2), ..., (snr2, chunk1), ...],
+                'ms_ssim': [ssim for (snr1, chunk1), (snr1, chunk2), ..., (snr2, chunk1), ...]
+            }
     """
     net.eval()
     
-    results = {
-        'snr': [],
-        'psnr': [],
-        'ssim': []
-    }
-    
     logger.info("=" * 80)
-    logger.info("SNR vs Performance Test")
+    logger.info("SNR vs Performance Test (All Chunks)")
     logger.info(f"Packet Size: {args.packet_size} (fixed)")
     logger.info(f"Progressive Mode: {args.progressive_mode}")
-    if num_chunks is not None:
-        logger.info(f"Measuring performance at chunk {num_chunks}")
-    else:
-        logger.info(f"Measuring performance at final chunk (all chunks)")
     logger.info(f"SNR Range: {snr_list}")
     logger.info("=" * 80)
     
+    # First pass: determine number of chunks
+    num_chunks = None
+    with torch.no_grad():
+        for i, input_img in enumerate(loader):
+            input_img = input_img.to(config.device)
+            if isinstance(net, nn.DataParallel):
+                results_dict = net.module(input_img, snr_list[0], force_progressive=True)
+            else:
+                results_dict = net(input_img, snr_list[0], force_progressive=True)
+            num_chunks = len(results_dict['mse'])
+            break
+    
+    logger.info(f"Number of chunks: {num_chunks}")
+    
+    # Calculate CBR for each chunk
+    cbr_list = [calculate_cbr(chunk_num) for chunk_num in range(1, num_chunks + 1)]
+    
+    # Results structure: flattened list for each (SNR, chunk) combination
+    results = {
+        'snr': [],
+        'chunk': [],
+        'cbr': [],
+        'psnr': [],
+        'ms_ssim': []
+    }
+    
+    # Test each SNR
     for snr in snr_list:
         logger.info(f"\n--- Testing SNR: {snr} dB ---")
         
-        psnr_avg = AverageMeter()
-        ssim_avg = AverageMeter()
+        # Initialize meters for each chunk
+        chunk_psnrs = [AverageMeter() for _ in range(num_chunks)]
+        chunk_ssims = [AverageMeter() for _ in range(num_chunks)]
         
         with torch.no_grad():
             for i, input_img in enumerate(loader):
@@ -257,30 +303,34 @@ def test_snr_performance(net, loader, config, args, logger,
                 mse_list = results_dict['mse']
                 recon_list = results_dict['recon_img']
                 
-                if num_chunks is not None:
-                    chunk_idx = min(num_chunks - 1, len(mse_list) - 1)
-                else:
-                    chunk_idx = len(mse_list) - 1
-                
-                mse_val = mse_list[chunk_idx].mean()
-                recon_img = recon_list[chunk_idx]
-                
-                if mse_val.item() > 0:
-                    psnr = 10 * np.log10(1.0 / mse_val.item())
-                    psnr_avg.update(psnr)
-                
-                ssim_val = ms_ssim(recon_img, input_img, data_range=1.0).item()
-                ssim_avg.update(ssim_val)
+                # Measure performance for all chunks
+                for chunk_idx in range(num_chunks):
+                    mse_val = mse_list[chunk_idx].mean()
+                    recon_img = recon_list[chunk_idx]
+                    
+                    if mse_val.item() > 0:
+                        psnr = 10 * np.log10(1.0 / mse_val.item())
+                        chunk_psnrs[chunk_idx].update(psnr)
+                    
+                    ssim_val = ms_ssim(recon_img, input_img, data_range=1.0).item()
+                    chunk_ssims[chunk_idx].update(ssim_val)
         
-        results['snr'].append(snr)
-        results['psnr'].append(psnr_avg.avg)
-        results['ssim'].append(ssim_avg.avg)
+        # Store results for this SNR (flattened: one entry per chunk)
+        for chunk_idx in range(num_chunks):
+            results['snr'].append(snr)
+            results['chunk'].append(chunk_idx + 1)
+            results['cbr'].append(cbr_list[chunk_idx])
+            results['psnr'].append(chunk_psnrs[chunk_idx].avg)
+            results['ms_ssim'].append(chunk_ssims[chunk_idx].avg)
         
-        logger.info(
-            f"SNR: {snr:5.1f} dB | "
-            f"PSNR: {psnr_avg.avg:.2f} dB | "
-            f"MS-SSIM: {ssim_avg.avg:.4f}"
-        )
+        # Log results for this SNR
+        logger.info(f"SNR: {snr:5.1f} dB - Chunk-by-chunk results:")
+        for chunk_idx in range(num_chunks):
+            logger.info(
+                f"  Chunk {chunk_idx + 1:2d}/{num_chunks} (CBR={cbr_list[chunk_idx]:.4f}): "
+                f"PSNR={chunk_psnrs[chunk_idx].avg:.2f} dB, "
+                f"MS-SSIM={chunk_ssims[chunk_idx].avg:.4f}"
+            )
     
     logger.info("=" * 80)
     logger.info("SNR vs Performance Test Completed")
@@ -333,28 +383,31 @@ def run_test_mode(args, net, val_loader, config, logger):
     load_test_model(net, args, logger)
     
     # SNR performance test (if test_snr_list is provided)
-    if args.test_snr_list is not None:
+    if args.test_snr_list is not None and args.test_snr_list.strip():
         try:
             # Parse comma-separated SNR list
             snr_list = [float(x.strip()) for x in args.test_snr_list.split(',')]
             snr_list = sorted(snr_list)  # Sort for consistent ordering
             logger.info(f"SNR list provided: {snr_list}")
             
-            # Perform SNR performance test
+            # Perform SNR performance test (all chunks for each SNR)
             results = test_snr_performance(
                 net, val_loader, config, args, logger,
-                snr_list=snr_list,
-                num_chunks=args.test_snr_chunk
+                snr_list=snr_list
             )
             
             # Save results and plots
-            save_snr_test_results(results, config.workdir, args, logger, num_chunks=args.test_snr_chunk)
+            save_snr_test_results(results, config.workdir, args, logger)
             
         except ValueError as e:
             logger.error(f"Invalid SNR list format: {args.test_snr_list}. Use comma-separated values (e.g., '-5,0,5,10,15,20'). Error: {e}")
             return
     else:
-        # Normal test mode (single SNR)
-        test_snr = 0 if args.channel_type == 'noiseless' else args.train_snr
-        logger.info(f"--- Testing Mode: {args.progressive_mode}, Packet Size: {args.packet_size}, SNR: {test_snr} dB ---")
+        # Normal test mode (single SNR) - use train_snr_list linear mean
+        if hasattr(config, 'train_snr_list') and config.train_snr_list:
+            snr_linear = np.mean([10 ** (snr_db / 10) for snr_db in config.train_snr_list])
+            test_snr = 10 * np.log10(snr_linear)
+        else:
+            test_snr = 0 if args.channel_type == 'noiseless' else 10.0  # default SNR
+        logger.info(f"--- Testing Mode: {args.progressive_mode}, Packet Size: {args.packet_size}, SNR: {test_snr:.2f} dB (train_snr_list average) ---")
         validate(val_loader, net, test_snr, 0, config, args, logger)

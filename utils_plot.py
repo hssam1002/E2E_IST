@@ -127,19 +127,26 @@ def plot_test_results(results, save_dir, logger):
     logger.info(f"MS-SSIM plot saved: {ssim_plot_path}")
 
 
-def save_snr_test_results(results, save_dir, args, logger, num_chunks=None):
+def save_snr_test_results(results, save_dir, args, logger):
     """
     Save SNR test results to files.
     
     Args:
-        results (dict): Test results dictionary {'snr': [...], 'psnr': [...], 'ssim': [...]}
+        results (dict): Test results dictionary with structure:
+            {
+                'snr': [snr1, snr2, ...],
+                'chunk': [1, 2, 3, ...],
+                'cbr': [cbr1, cbr2, ...],
+                'psnr': [[psnr for each chunk at snr1], ...],
+                'ms_ssim': [[ssim for each chunk at snr1], ...]
+            }
         save_dir (str): Save directory
         args: Parsed arguments
         logger: Logger object
-        num_chunks (int, optional): Measured chunk number
     """
     os.makedirs(save_dir, exist_ok=True)
     
+    # Results are already flattened: each row is (snr, chunk, cbr, psnr, ms_ssim)
     df = pd.DataFrame(results)
     csv_path = os.path.join(save_dir, 'snr_test_results.csv')
     df.to_csv(csv_path, index=False)
@@ -150,8 +157,7 @@ def save_snr_test_results(results, save_dir, args, logger, num_chunks=None):
             'channel_type': args.channel_type,
             'testset': args.testset,
             'progressive_mode': args.progressive_mode,
-            'packet_size': args.packet_size,
-            'num_chunks': num_chunks
+            'packet_size': args.packet_size
         },
         'results': results
     }
@@ -160,46 +166,73 @@ def save_snr_test_results(results, save_dir, args, logger, num_chunks=None):
         json.dump(json_results, f, indent=2)
     logger.info(f"SNR test results saved to JSON: {json_path}")
     
-    plot_snr_test_results(results, save_dir, logger, num_chunks)
+    plot_snr_test_results(results, save_dir, logger)
 
 
-def plot_snr_test_results(results, save_dir, logger, num_chunks=None):
+def plot_snr_test_results(results, save_dir, logger):
     """
     Visualize SNR test results as graphs.
+    Plot PSNR and MS-SSIM vs CBR for each SNR.
     
     Args:
-        results (dict): Test results dictionary {'snr': [...], 'psnr': [...], 'ssim': [...]}
+        results (dict): Test results dictionary with flattened structure:
+            {
+                'snr': [snr1, snr1, ..., snr2, snr2, ...],  # One per (snr, chunk)
+                'chunk': [1, 2, 3, ..., 1, 2, 3, ...],  # One per (snr, chunk)
+                'cbr': [cbr1, cbr2, ..., cbr1, cbr2, ...],  # One per (snr, chunk)
+                'psnr': [psnr for each (snr, chunk)],
+                'ms_ssim': [ssim for each (snr, chunk)]
+            }
         save_dir (str): Save directory
         logger: Logger object
-        num_chunks (int, optional): Measured chunk number
     """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Convert to DataFrame for easier manipulation
     df = pd.DataFrame(results)
-    df = df.sort_values('snr')
     
-    chunk_info = f" (chunk {num_chunks})" if num_chunks is not None else " (final chunk)"
+    # Get unique SNR values
+    unique_snrs = sorted(df['snr'].unique())
     
-    # PSNR graph
-    plt.figure(figsize=(10, 6))
-    plt.plot(df['snr'], df['psnr'], marker='o', linewidth=2, markersize=8, color='blue')
-    plt.xlabel('SNR (dB)', fontsize=12)
-    plt.ylabel('PSNR (dB)', fontsize=12)
-    plt.title(f'PSNR vs SNR{chunk_info}', fontsize=14)
-    plt.grid(True, alpha=0.3)
+    # Plot PSNR vs CBR for each SNR
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_snrs)))
+    markers = ['o', 's', '^', 'v', 'D', 'p', '*', 'h', 'X', '+']
+    
+    for snr_idx, snr in enumerate(unique_snrs):
+        # Filter data for this SNR and sort by CBR
+        snr_data = df[df['snr'] == snr].sort_values('cbr')
+        
+        ax1.plot(snr_data['cbr'], snr_data['psnr'], 
+                marker=markers[snr_idx % len(markers)],
+                label=f'SNR={snr:.1f} dB',
+                linewidth=2,
+                markersize=6,
+                color=colors[snr_idx])
+        
+        ax2.plot(snr_data['cbr'], snr_data['ms_ssim'],
+                marker=markers[snr_idx % len(markers)],
+                label=f'SNR={snr:.1f} dB',
+                linewidth=2,
+                markersize=6,
+                color=colors[snr_idx])
+    
+    ax1.set_xlabel('CBR (Channel Bit Ratio)', fontsize=12)
+    ax1.set_ylabel('PSNR (dB)', fontsize=12)
+    ax1.set_title('PSNR vs CBR (by SNR)', fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=8, loc='best', ncol=2)
+    
+    ax2.set_xlabel('CBR (Channel Bit Ratio)', fontsize=12)
+    ax2.set_ylabel('MS-SSIM', fontsize=12)
+    ax2.set_title('MS-SSIM vs CBR (by SNR)', fontsize=14, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=8, loc='best', ncol=2)
+    
     plt.tight_layout()
-    psnr_plot_path = os.path.join(save_dir, 'psnr_vs_snr.png')
-    plt.savefig(psnr_plot_path, dpi=300, bbox_inches='tight')
+    plot_path = os.path.join(save_dir, 'snr_cbr_comparison.png')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    logger.info(f"PSNR vs SNR plot saved: {psnr_plot_path}")
-    
-    # MS-SSIM graph
-    plt.figure(figsize=(10, 6))
-    plt.plot(df['snr'], df['ssim'], marker='s', linewidth=2, markersize=8, color='green')
-    plt.xlabel('SNR (dB)', fontsize=12)
-    plt.ylabel('MS-SSIM', fontsize=12)
-    plt.title(f'MS-SSIM vs SNR{chunk_info}', fontsize=14)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    ssim_plot_path = os.path.join(save_dir, 'ssim_vs_snr.png')
-    plt.savefig(ssim_plot_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    logger.info(f"MS-SSIM vs SNR plot saved: {ssim_plot_path}")
+    logger.info(f"SNR vs CBR comparison plot saved: {plot_path}")
