@@ -294,7 +294,7 @@ class SwinJSCC_Encoder(nn.Module):
     """
     Swin Transformer 기반 Encoder.
     
-    이미지를 특징 벡터로 인코딩합니다.
+    이미지를 특징 벡터로 인코딩하고, MLP를 통해 전송 차원(C')으로 변환합니다.
     
     Args:
         img_size (tuple[int]): 입력 이미지 해상도 (예: (256, 256))
@@ -311,6 +311,7 @@ class SwinJSCC_Encoder(nn.Module):
         patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 입력 채널 수 (RGB 이미지의 경우 3). Default: 3
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
+        transmitted_dim (int, optional): 전송 차원 (C'). None이면 encoder output dimension 사용. Default: None
         **kwargs: 추가 인자
     """
     def __init__(self,
@@ -342,7 +343,12 @@ class SwinJSCC_Encoder(nn.Module):
         self.patch_embed = PatchEmbed(img_size, 2, 3, embed_dims[0])
         self.use_checkpoint = use_checkpoint
         
-        # build layers
+        # Transmitted dimension (C'): if None, use encoder output dimension (C)
+        self.transmitted_dim = kwargs.get('transmitted_dim', None)
+        if self.transmitted_dim is None:
+            self.transmitted_dim = embed_dims[-1]
+        
+        # Build layers
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
             layer = BasicLayer(dim=int(embed_dims[i_layer - 1]) if i_layer != 0 else 3,
@@ -359,10 +365,15 @@ class SwinJSCC_Encoder(nn.Module):
                                use_checkpoint = self.use_checkpoint)
             print("Encoder ", layer.extra_repr())
             self.layers.append(layer)
-            
-        self.norm = norm_layer(embed_dims[-1])       
+        
+        self.norm = norm_layer(embed_dims[-1])
+        
+        # MLP for encoder output: C -> C'
+        if self.transmitted_dim != embed_dims[-1]:
+            self.head_list = nn.Sequential(nn.Linear(embed_dims[-1], self.transmitted_dim))
+        else:
+            self.head_list = nn.Identity()
 
-        self.head_list = nn.Identity()     
         self.apply(self._init_weights)
 
     def forward(self, x, model=None):
@@ -456,13 +467,3 @@ def create_encoder(**kwargs):
     """
     model = SwinJSCC_Encoder(**kwargs)
     return model
-
-def build_model(config):
-    input_image = torch.ones([1, 256, 256]).to(config.device)
-    model = create_encoder(**config.encoder_kwargs)
-    model(input_image)
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    print("TOTAL Params {}M".format(num_params / 10 ** 6))
-    print("TOTAL FLOPs {}G".format(model.flops() / 10 ** 9))

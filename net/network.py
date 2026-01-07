@@ -45,7 +45,11 @@ class E2E_SwinJSCC(nn.Module):
         self.decoder = create_decoder(**decoder_kwargs)
         self.channel = Channel(args, config)
 
-        self.total_channels = config.encoder_kwargs['embed_dims'][-1]
+        # Transmitted dimension (C') - encoder/decoder 내부에서 MLP 처리
+        self.transmitted_dim = config.transmitted_dim
+        
+        # For backward compatibility
+        self.total_channels = self.transmitted_dim
         
         # Log network configuration
         if config.logger is not None:
@@ -106,21 +110,22 @@ class E2E_SwinJSCC(nn.Module):
             self.decoder.update_resolution(ds_H, ds_W)
             self.H, self.W = H, W
 
-        # 1. Feature Extraction: 이미지를 특징 벡터로 인코딩 (B, Seq, C_total)
-        feat_all = self.encoder(input_image)
-        B, Seq, C_total = feat_all.shape
+        # 1. Feature Extraction: 이미지를 특징 벡터로 인코딩 및 MLP Projection
+        # Encoder 내부에서 MLP가 처리됨: (B, Seq, C) -> (B, Seq, C')
+        feat_transmitted = self.encoder(input_image)  # (B, Seq, C')
+        B, Seq, C_prime = feat_transmitted.shape
 
         # Random mask를 위한 패킷 인덱스 (rand_mask 모드용)
-        total_packets = (C_total + self.packet_size - 1) // self.packet_size
+        total_packets = (C_prime + self.packet_size - 1) // self.packet_size
         random_idx = np.random.randint(0, total_packets)
         
         # 전력 정규화 및 채널 통과 (정렬 없이 원본 사용)
-        tx_norm = self.power_normalize(feat_all)
-        rx_all = self.channel(tx_norm, snr, avg_pwr=True)
+        tx_norm = self.power_normalize(feat_transmitted)
+        rx_all = self.channel(tx_norm, snr, avg_pwr=True)  # (B, Seq, C')
 
         # Random mask 종료 인덱스 계산
         c_end = (random_idx + 1) * self.packet_size
-        c_end = min(c_end, C_total)
+        c_end = min(c_end, C_prime)
         
         # ============================================================================
         # Progressive Mode에 따른 처리
@@ -128,20 +133,20 @@ class E2E_SwinJSCC(nn.Module):
         
         # Force progressive: 모든 mode에서 chunk-by-chunk progressive decoding (validate용)
         if force_progressive:
-            feat_received_buffer = torch.zeros_like(feat_all)
+            feat_received_buffer = torch.zeros_like(rx_all)  # (B, Seq, C')
             mse_losses = []
             recon_imgs = []
 
             # 순차 전송 (원래 순서)
-            for c_idx in range(0, C_total, self.packet_size):
+            for c_idx in range(0, C_prime, self.packet_size):
                 c_start = c_idx
-                c_end = min(c_idx + self.packet_size, C_total)
+                c_end = min(c_idx + self.packet_size, C_prime)
                 
                 # Buffer 업데이트: 새로운 패킷 추가
                 feat_received_buffer = feat_received_buffer.clone()
                 feat_received_buffer[:, :, c_start:c_end] = rx_all[:, :, c_start:c_end]
                 
-                # 디코딩
+                # Decoding (Decoder 내부에서 MLP가 처리됨: C' -> C)
                 recon = self.decoder(feat_received_buffer)
                 mse_val = nn.MSELoss()(recon, input_image)
                 mse_losses.append(mse_val)
@@ -156,7 +161,7 @@ class E2E_SwinJSCC(nn.Module):
         # 전체 특징을 한 번에 전송하고 복원
         # 테스트는 force_progressive 블록에서 처리되므로 여기서는 학습 모드만 처리
         if self.args.progressive_mode == 'off':
-            # 학습 모드: 전체 한 번에 전송
+            # 학습 모드: 전체 한 번에 전송 (Decoder 내부에서 MLP 처리)
             recon = self.decoder(rx_all)
             mse_val = nn.MSELoss()(recon, input_image)
             return {'mse': [mse_val], 'recon_img': [recon]}
@@ -165,10 +170,10 @@ class E2E_SwinJSCC(nn.Module):
         # 랜덤으로 선택된 패킷까지만 전송
         elif self.args.progressive_mode == 'rand_mask_1':
             # 뒷부분을 0으로 마스킹
-            feat_received_buffer = torch.zeros_like(rx_all)
+            feat_received_buffer = torch.zeros_like(rx_all)  # (B, Seq, C')
             feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
             
-            # 디코딩 및 Loss 계산
+            # Decoding (Decoder 내부에서 MLP 처리)
             recon = self.decoder(feat_received_buffer)
             mse_val = nn.MSELoss()(recon, input_image)
             
@@ -177,14 +182,15 @@ class E2E_SwinJSCC(nn.Module):
         # [Optimized Path] Mode: 'rand_mask_2'
         # Full 디코딩 1회 + Partial 마스킹 후 디코딩 1회
         elif self.args.progressive_mode == 'rand_mask_2':
-            # 1. Full Path: 전체 특징으로 복원
+            # 1. Full Path: 전체 특징으로 복원 (Decoder 내부에서 MLP 처리)
             recon_full = self.decoder(rx_all)
             mse_full = nn.MSELoss()(recon_full, input_image)
-
+            
             # 2. Partial Path: 마스킹된 특징으로 복원
-            feat_received_buffer = torch.zeros_like(rx_all)
+            feat_received_buffer = torch.zeros_like(rx_all)  # (B, Seq, C')
             feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
             
+            # Decoding (Decoder 내부에서 MLP 처리)
             recon_partial = self.decoder(feat_received_buffer)
             mse_partial = nn.MSELoss()(recon_partial, input_image)
 

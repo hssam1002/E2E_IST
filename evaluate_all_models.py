@@ -312,25 +312,68 @@ def plot_results(all_results, save_path):
 
 def main():
     """Main function to evaluate all models"""
-    # Setup
-    parser = setup_argument_parser()
-    args = parser.parse_args(['--testset', 'Kodak'])  # Use Kodak for validation
+    import argparse
     
-    config = Config(args)
+    # Setup argument parser
+    parser = argparse.ArgumentParser(description='Evaluate models and create CBR comparison plots')
+    parser.add_argument(
+        '--result_dirs',
+        type=str,
+        nargs='+',
+        default=None,
+        help='List of result directories to evaluate (e.g., /path/to/result1 /path/to/result2). If not provided, evaluates all models in results folder.'
+    )
+    parser.add_argument(
+        '--testset',
+        type=str,
+        default='Kodak',
+        help='Test dataset to use (default: Kodak)'
+    )
+    
+    eval_args = parser.parse_args()
+    
+    # Setup model args
+    model_parser = setup_argument_parser()
+    model_args = model_parser.parse_args(['--testset', eval_args.testset])
+    
+    config = Config(model_args)
     seed_torch(config.seed)
     logger = logger_configuration(config, save_log=False)
-    logger.info("Evaluating all models in results folder...")
+    
+    if eval_args.result_dirs:
+        logger.info(f"Evaluating {len(eval_args.result_dirs)} specific result directories...")
+        for dir_path in eval_args.result_dirs:
+            logger.info(f"  - {dir_path}")
+    else:
+        logger.info("Evaluating all models in results folder...")
     
     # Get validation loader
-    _, val_loader = get_loader(args, config)
+    _, val_loader = get_loader(model_args, config)
     
-    # Find all model files
+    # Find model files
     results_dir = "/data4/hongsik/E2E_IST/results"
-    model_pattern = os.path.join(results_dir, "**/best_model.pth")
-    model_files = glob.glob(model_pattern, recursive=True)
     
-    # Filter out OLD folder
-    model_files = [f for f in model_files if 'OLD' not in f]
+    if eval_args.result_dirs:
+        # Use specific result directories
+        model_files = []
+        for result_dir in eval_args.result_dirs:
+            # Check if it's a models directory or result directory
+            if result_dir.endswith('models'):
+                model_path = os.path.join(result_dir, 'best_model.pth')
+            else:
+                model_path = os.path.join(result_dir, 'models', 'best_model.pth')
+            
+            if os.path.exists(model_path):
+                model_files.append(model_path)
+                logger.info(f"  Found model: {model_path}")
+            else:
+                logger.warning(f"  Model not found: {model_path}")
+    else:
+        # Find all model files
+        model_pattern = os.path.join(results_dir, "**/best_model.pth")
+        model_files = glob.glob(model_pattern, recursive=True)
+        # Filter out OLD folder
+        model_files = [f for f in model_files if 'OLD' not in f]
     
     logger.info(f"Found {len(model_files)} models to evaluate")
     
@@ -339,7 +382,7 @@ def main():
     for model_path in model_files:
         try:
             logger.info(f"Evaluating: {model_path}")
-            result = evaluate_model(model_path, args, config, val_loader, logger)
+            result = evaluate_model(model_path, model_args, config, val_loader, logger)
             all_results.append(result)
             logger.info(f"  Completed: {result['num_chunks']} chunks, Final PSNR: {result['psnr'][-1]:.2f} dB")
         except Exception as e:
@@ -359,13 +402,21 @@ def main():
             'packet_size': result['packet_size']
         })
     
-    json_path = os.path.join(results_dir, 'all_models_evaluation.json')
+    # Save results to JSON
+    if eval_args.result_dirs:
+        json_filename = '3_results_comparison.json'
+        plot_filename = 'cbr_comparison_3_results.png'
+    else:
+        json_filename = 'all_models_evaluation.json'
+        plot_filename = 'cbr_comparison.png'
+    
+    json_path = os.path.join(results_dir, json_filename)
     with open(json_path, 'w') as f:
         json.dump(results_data, f, indent=2)
     logger.info(f"Results saved to: {json_path}")
     
     # Plot results
-    plot_path = os.path.join(results_dir, 'cbr_comparison.png')
+    plot_path = os.path.join(results_dir, plot_filename)
     plot_results(all_results, plot_path)
     
     logger.info("Evaluation completed!")

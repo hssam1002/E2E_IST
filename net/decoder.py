@@ -118,17 +118,15 @@ class BasicLayer(nn.Module):
         flops = 0
         for blk in self.blocks:
             flops += blk.flops()
-            print("blk.flops()", blk.flops())
         if self.upsample is not None:
             flops += self.upsample.flops()
-            print("upsample.flops()", self.upsample.flops())
         return flops
 
 class SwinJSCC_Decoder(nn.Module):
     """
     Swin Transformer 기반 Decoder.
     
-    특징 벡터를 이미지로 디코딩합니다.
+    전송된 특징 벡터(C')를 MLP로 변환한 후 이미지로 디코딩합니다.
     
     Args:
         img_size (tuple[int]): 복원 이미지의 최종 해상도 (예: (256, 256))
@@ -145,6 +143,7 @@ class SwinJSCC_Decoder(nn.Module):
         patch_size (int): 초기 embedding의 patch 크기. Default: 2
         in_chans (int): 출력 채널 수 (RGB 이미지의 경우 3). Default: 3
         use_checkpoint (bool): Gradient checkpointing 사용 여부. Default: False
+        transmitted_dim (int, optional): 전송 차원 (C'). None이면 decoder input dimension 사용. Default: None
         **kwargs: 추가 인자
     """
     def __init__(self, 
@@ -171,8 +170,13 @@ class SwinJSCC_Decoder(nn.Module):
         self.W = img_size[1]
         self.patches_resolution = (img_size[0] // 2 ** len(depths), img_size[1] // 2 ** len(depths))
         self.use_checkpoint = use_checkpoint
-
-        # 1. Reconstruction Layers
+        
+        # Transmitted dimension (C'): if None, use decoder input dimension (first embed_dim)
+        self.transmitted_dim = kwargs.get('transmitted_dim', None)
+        if self.transmitted_dim is None:
+            self.transmitted_dim = embed_dims[0]
+        
+        # Build reconstruction layers
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
             layer = BasicLayer(dim=int(embed_dims[i_layer]),
@@ -186,11 +190,16 @@ class SwinJSCC_Decoder(nn.Module):
                                qkv_bias=qkv_bias, qk_scale=qk_scale,
                                norm_layer=norm_layer,
                                upsample=PatchReverseMerging,
-                               use_checkpoint = self.use_checkpoint) 
+                               use_checkpoint=self.use_checkpoint)
             self.layers.append(layer)
             print("Decoder ", layer.extra_repr())
+        
+        # MLP for decoder input: C' -> C (first decoder dimension)
+        if self.transmitted_dim != embed_dims[0]:
+            self.head_list = nn.Sequential(nn.Linear(self.transmitted_dim, embed_dims[0]))
+        else:
+            self.head_list = nn.Identity()
 
-        self.head_list = nn.Identity()
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -206,18 +215,18 @@ class SwinJSCC_Decoder(nn.Module):
         Forward pass.
         
         Args:
-            x (torch.Tensor): 인코딩된 특징 벡터 (B, L, C)
+            x (torch.Tensor): 전송된 특징 벡터 (B, L, C')
         
         Returns:
             torch.Tensor: 복원된 이미지 (B, 3, H, W)
         """
-        # Head layer 통과
+        # MLP projection: C' -> C (first decoder dimension)
         x_recon = self.head_list(x)
         
         # Swin Transformer layers (Upsampling 포함)
         for layer in self.layers:
             x_recon = layer(x_recon)
-
+        
         # (B, L, 3) -> (B, 3, H, W) 변환
         B, L, Ch = x_recon.shape
         x_recon = x_recon.view(B, self.H, self.W, Ch).permute(0, 3, 1, 2)

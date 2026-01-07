@@ -9,5 +9,4 @@ python main.py \
     --trainset DIV2K \
     --testset Kodak \
     --channel_type awgn \
-    --progressive_mode rand_mask_2 \
-    --train_snr_list 10
+    --progressive_mode rand_mask_2

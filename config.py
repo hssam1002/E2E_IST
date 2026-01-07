@@ -10,14 +10,14 @@ from datetime import datetime
 
 # Constants
 DEFAULT_SEED = 42
-DEFAULT_TOTAL_EPOCHS = 1000
-DEFAULT_PRINT_STEP = 10
-DEFAULT_SAVE_MODEL_FREQ = 20
+DEFAULT_TOTAL_EPOCHS = 5000
+DEFAULT_PRINT_STEP = 100
+DEFAULT_SAVE_MODEL_FREQ = 50
 DEFAULT_BATCH_SIZE_PER_GPU = 8
 
 # Packet Size
 DEFAULT_PACKET_SIZE = 16
-DEFAULT_NOISELESS_EPOCH_SIZE = 100  # Number of epochs to use noiseless channel before switching to train_snr_list
+DEFAULT_NOISELESS_EPOCH_SIZE = 300  # Number of epochs to use noiseless channel before switching to train_snr_list
 
 
 def setup_argument_parser():
@@ -115,6 +115,12 @@ def setup_argument_parser():
         default='4,6,8,10',
         help='Number of attention heads for encoder stages (comma-separated). Decoder uses reverse order. Default: 4,6,8,10'
     )
+    parser.add_argument(
+        '--transmitted_dim',
+        type=int,
+        default=320,
+        help='Transmitted channel dimension (C\') after MLP projection. If None, uses encoder output dimension (C). Default: 320'
+    )
     
     # Loss Function Settings
     parser.add_argument(
@@ -170,7 +176,14 @@ def setup_argument_parser():
         type=str,
         default='-10,-5, 0, 5, 10',
         help='Comma-separated SNR values for SNR performance test (e.g., "-5,0,5,10,15,20"). If provided, performs SNR sweep test.'
-    )    
+    )
+    parser.add_argument(
+        '--test_snr_chunk',
+        type=int,
+        default=16,
+        help='Chunk number to measure for SNR test. If None, measures at final chunk.'
+    )
+    
     return parser
 
 
@@ -236,6 +249,12 @@ class Config:
         depths = [int(x.strip()) for x in args.depths.split(',')]
         num_heads = [int(x.strip()) for x in args.num_heads.split(',')]
         
+        # Transmitted dimension (C'): if None, use encoder output dimension (C)
+        if args.transmitted_dim is None:
+            self.transmitted_dim = embed_dims[-1]  # Use last encoder dimension
+        else:
+            self.transmitted_dim = args.transmitted_dim
+        
         # Validate architecture parameters
         if len(embed_dims) != len(depths) or len(embed_dims) != len(num_heads):
             raise ValueError(
@@ -263,6 +282,7 @@ class Config:
             embed_dims=embed_dims,
             depths=depths,
             num_heads=num_heads,
+            transmitted_dim=self.transmitted_dim,
             **common_kwargs
         )
         
@@ -271,5 +291,6 @@ class Config:
             embed_dims=list(reversed(embed_dims)),
             depths=list(reversed(depths)),
             num_heads=list(reversed(num_heads)),
+            transmitted_dim=self.transmitted_dim,
             **common_kwargs
         )
