@@ -10,14 +10,14 @@ from datetime import datetime
 
 # Constants
 DEFAULT_SEED = 42
-DEFAULT_TOTAL_EPOCHS = 5000
-DEFAULT_PRINT_STEP = 100
+DEFAULT_TOTAL_EPOCHS = 1500
+DEFAULT_PRINT_STEP = 50
 DEFAULT_SAVE_MODEL_FREQ = 50
 DEFAULT_BATCH_SIZE_PER_GPU = 8
 
 # Packet Size
 DEFAULT_PACKET_SIZE = 16
-DEFAULT_NOISELESS_EPOCH_SIZE = 300  # Number of epochs to use noiseless channel before switching to train_snr_list
+DEFAULT_NOISELESS_EPOCH_SIZE = 0  # Number of epochs to use noiseless channel before switching to train_snr_list
 
 
 def setup_argument_parser():
@@ -85,9 +85,34 @@ def setup_argument_parser():
     parser.add_argument(
         '--progressive_mode', 
         type=str, 
-        default='rand_mask_2',
-        choices=['off', 'rand_mask_1', 'rand_mask_2'],
-        help='Progressive mode strategy'
+        default='full',
+        choices=[
+            # New 7 training strategies (Table)
+            'full',          # a) Full
+            'full_m',        # b) Full_m
+            'full_dual',     # c) Full_dual
+            'full_part',     # d) Full_part
+            'full_part_m',   # e) Full_part_m
+            'mask_only',     # f) Mask_only
+            'hybrid_all',    # g) hybrid_all
+            'chunk1_full',   # h) chunk 1개를 받았을 때 + 전체 받았을 때
+            # Legacy names (mapped internally for backward compatibility)
+            'off',
+            'rand_mask_1',
+            'rand_mask_2',
+        ],
+        help=(
+            "Progressive mode / training strategy. "
+            "New modes: "
+            "'full', 'full_m', 'full_dual', 'full_part', 'full_part_m', 'mask_only', 'hybrid_all', 'chunk1_full'. "
+            "Legacy aliases: 'off' -> 'full', 'rand_mask_2' -> 'full_part'."
+        )
+    )
+    parser.add_argument(
+        '--mask_prob',
+        type=float,
+        default=0.1,
+        help='Probability that a random masking error occurs during training (e.g., 0.1 = 10%).'
     )
     parser.add_argument(
         '--packet_size', 
@@ -177,12 +202,6 @@ def setup_argument_parser():
         default='-10,-5, 0, 5, 10',
         help='Comma-separated SNR values for SNR performance test (e.g., "-5,0,5,10,15,20"). If provided, performs SNR sweep test.'
     )
-    parser.add_argument(
-        '--test_snr_chunk',
-        type=int,
-        default=16,
-        help='Chunk number to measure for SNR test. If None, measures at final chunk.'
-    )
     
     return parser
 
@@ -243,6 +262,9 @@ class Config:
         self.print_step = DEFAULT_PRINT_STEP
         self.save_model_freq = DEFAULT_SAVE_MODEL_FREQ
         self.batch_size = DEFAULT_BATCH_SIZE_PER_GPU * torch.cuda.device_count()
+        self.progressive_mode = args.progressive_mode
+        # Probability that random masking error occurs (used in progressive training modes)
+        self.mask_prob = getattr(args, 'mask_prob', 0.1)
         
         # Parse architecture parameters
         embed_dims = [int(x.strip()) for x in args.embed_dims.split(',')]

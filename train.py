@@ -31,18 +31,11 @@ def compute_loss(args, mse_list, recon_list, input_img, device):
         raise ValueError(f"loss_weights must have 2 values [lambda_1 (MSE), lambda_2 (MS-SSIM)]. Got {len(loss_weights)}")
     lambda_mse, lambda_ms_ssim = loss_weights
     
-    # Select which losses to use based on progressive mode
-    if args.progressive_mode == 'off':
-        mse_selections = [mse_list[-1]]
-        recon_selections = [recon_list[-1]]
-    elif args.progressive_mode == 'rand_mask_1':
-        mse_selections = [mse_list[0]]
-        recon_selections = [recon_list[0]]
-    elif args.progressive_mode == 'rand_mask_2':
-        mse_selections = mse_list  # [partial_mse, full_mse]
-        recon_selections = recon_list  # [partial_recon, full_recon]
-    else:
-        raise ValueError(f"Unknown progressive_mode: {args.progressive_mode}")
+    # 네트워크에서 objective(표의 d_s(·) 조합)에 맞게 여러 reconstruction을 반환하므로,
+    # 여기서는 단순히 모든 항에 대해 동일한 손실을 계산해서 합산한다.
+    # (모드별로 어떤 조합을 쓸지는 net.forward에서 결정)
+    mse_selections = mse_list
+    recon_selections = recon_list
     
     # Compute loss for each selected reconstruction
     # For rand_mask_2: computes loss separately for partial and full reconstructions

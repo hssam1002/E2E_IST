@@ -59,6 +59,17 @@ class E2E_SwinJSCC(nn.Module):
 
         # Progressive Steps
         self.packet_size = args.packet_size
+        # Random masking (error) probability (Config에서 arg를 통해 설정됨)
+        self.mask_prob = config.mask_prob
+
+        # Chunk 관련 파라미터는 transmitted_dim과 packet_size에만 의존하므로
+        # 한 번만 계산해두고 forward에서 재사용 (속도/안정성 향상)
+        self.L = (self.transmitted_dim + self.packet_size - 1) // self.packet_size  # 총 chunk 수
+        self.chunk_ranges = []
+        for i in range(self.L):
+            c_start = i * self.packet_size
+            c_end = min((i + 1) * self.packet_size, self.transmitted_dim)
+            self.chunk_ranges.append((c_start, c_end))
 
         # Resolution Info
         self.H = self.W = 0
@@ -115,17 +126,58 @@ class E2E_SwinJSCC(nn.Module):
         feat_transmitted = self.encoder(input_image)  # (B, Seq, C')
         B, Seq, C_prime = feat_transmitted.shape
 
-        # Random mask를 위한 패킷 인덱스 (rand_mask 모드용)
-        total_packets = (C_prime + self.packet_size - 1) // self.packet_size
-        random_idx = np.random.randint(0, total_packets)
-        
         # 전력 정규화 및 채널 통과 (정렬 없이 원본 사용)
         tx_norm = self.power_normalize(feat_transmitted)
         rx_all = self.channel(tx_norm, snr, avg_pwr=True)  # (B, Seq, C')
 
-        # Random mask 종료 인덱스 계산
-        c_end = (random_idx + 1) * self.packet_size
-        c_end = min(c_end, C_prime)
+        # ------------------------------------------------------------------
+        # Chunk 정의
+        #   - C' 차원을 packet_size 기준으로 나눔
+        #   - self.L: 총 chunk 개수 (초기화 시 계산)
+        #   - ℓ: {1, ..., self.L} 중 랜덤 샘플 (partial 전송 시 사용)
+        # ------------------------------------------------------------------
+        # 안전을 위해 encoder 출력 채널 수와 transmitted_dim이 일치하는지 확인
+        if C_prime != self.transmitted_dim:
+            raise ValueError(
+                f"Encoder output dim (C'={C_prime}) must match transmitted_dim ({self.transmitted_dim})"
+            )
+
+        L = self.L
+        # ℓ 선택 (1~L)
+        ell = np.random.randint(1, L + 1)
+        ell_end = self.chunk_ranges[ell - 1][1]
+
+        # ------------------------------------------------------------------
+        # rmask(·): chunk 단위로 10% 확률로 0으로 만드는 랜덤 마스킹 함수
+        #   - mask_prob: 각 chunk가 "에러"로 0이 될 확률 (기본 0.1)
+        #   - rmask(z_{≤L}): L개 모든 chunk에 대해 독립적으로 적용
+        #   - rmask(z_{≤ℓ}): 1~ℓ chunk에만 적용 (그 이후는 원래도 0)
+        # ------------------------------------------------------------------
+        def make_packet_mask(num_active_chunks):
+            """
+            Args:
+                num_active_chunks (int): rmask를 적용할 chunk 수 (예: L 또는 ℓ)
+            Returns:
+                torch.Tensor: (1, 1, C') shape의 float mask (0 또는 1)
+            """
+            # 기본은 모두 0 (전송 안 된 chunk)
+            mask_chunks = np.zeros(L, dtype=np.float32)
+            # 활성화된 chunk(1~num_active_chunks)에 대해 rmask 적용
+            if num_active_chunks > 0:
+                # 각 chunk마다 1 - mask_prob 확률로 정상 전송(1), mask_prob 확률로 0
+                active = (np.random.rand(num_active_chunks) > self.mask_prob).astype(np.float32)
+                mask_chunks[:num_active_chunks] = active
+
+            # chunk mask를 channel 차원으로 펼치기
+            mask_full = np.repeat(mask_chunks, self.packet_size)
+            mask_full = mask_full[:C_prime]  # 마지막 chunk는 잘릴 수 있음
+            mask_full = torch.from_numpy(mask_full).to(rx_all.device).view(1, 1, C_prime)
+            return mask_full
+
+        def apply_mask(x, num_active_chunks):
+            """rmask()를 적용한 특징 벡터 반환"""
+            mask = make_packet_mask(num_active_chunks)
+            return x * mask
         
         # ============================================================================
         # Progressive Mode에 따른 처리
@@ -157,50 +209,142 @@ class E2E_SwinJSCC(nn.Module):
                 'recon_img': recon_imgs
             }
         
-        # [Fast Path] Mode: 'off' (Non-progressive Model)
-        # 전체 특징을 한 번에 전송하고 복원
-        # 테스트는 force_progressive 블록에서 처리되므로 여기서는 학습 모드만 처리
-        if self.args.progressive_mode == 'off':
-            # 학습 모드: 전체 한 번에 전송 (Decoder 내부에서 MLP 처리)
-            recon = self.decoder(rx_all)
-            mse_val = nn.MSELoss()(recon, input_image)
-            return {'mse': [mse_val], 'recon_img': [recon]}
-        
-        # [Optimized Path] Mode: 'rand_mask_1'
-        # 랜덤으로 선택된 패킷까지만 전송
-        elif self.args.progressive_mode == 'rand_mask_1':
-            # 뒷부분을 0으로 마스킹
-            feat_received_buffer = torch.zeros_like(rx_all)  # (B, Seq, C')
-            feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
-            
-            # Decoding (Decoder 내부에서 MLP 처리)
-            recon = self.decoder(feat_received_buffer)
-            mse_val = nn.MSELoss()(recon, input_image)
-            
-            return {'mse': [mse_val], 'recon_img': [recon]}
-        
-        # [Optimized Path] Mode: 'rand_mask_2'
-        # Full 디코딩 1회 + Partial 마스킹 후 디코딩 1회
-        elif self.args.progressive_mode == 'rand_mask_2':
-            # 1. Full Path: 전체 특징으로 복원 (Decoder 내부에서 MLP 처리)
-            recon_full = self.decoder(rx_all)
-            mse_full = nn.MSELoss()(recon_full, input_image)
-            
-            # 2. Partial Path: 마스킹된 특징으로 복원
-            feat_received_buffer = torch.zeros_like(rx_all)  # (B, Seq, C')
-            feat_received_buffer[:, :, :c_end] = rx_all[:, :, :c_end]
-            
-            # Decoding (Decoder 내부에서 MLP 처리)
-            recon_partial = self.decoder(feat_received_buffer)
-            mse_partial = nn.MSELoss()(recon_partial, input_image)
+        # ------------------------------------------------------------------
+        # Training strategy / progressive_mode에 따른 조합
+        #
+        # 표의 Objective에 맞게 decoder를 여러 번 호출해서
+        #   d_s(z_L), d_s(rmask(z_L)), d_s(z_ℓ), d_s(rmask(z_ℓ))
+        # 에 해당하는 reconstruction들을 모두 반환한다.
+        # compute_loss()는 이 리스트에 대해 동일한 손실을 계산해 합산한다.
+        # ------------------------------------------------------------------
 
-            # [Partial, Full] 순서로 반환
-            return {
-                'mse': [mse_partial, mse_full],
-                'recon_img': [recon_partial, recon_full]
-            }
-        else:
-            raise ValueError(
-                f"Unsupported progressive_mode: {self.args.progressive_mode}. "
-                f"Supported modes: 'off', 'rand_mask_1', 'rand_mask_2'"
-            )
+        # Canonical mode 이름 정리 (legacy alias 지원)
+        mode = self.args.progressive_mode
+        if mode == 'off':
+            mode = 'full'          # a) Full
+        elif mode == 'rand_mask_2':
+            mode = 'full_part'     # d) Full_part (과거 rand_mask_2와 유사)
+
+        # Decoder 호출 횟수를 줄이기 위해 lazy evaluation + 캐시 사용
+        criterion = nn.MSELoss()
+        recon_cache = {}  # key -> (mse, recon)
+
+        # 공통적으로 사용할 feature들 (Decoder 입력)
+        #   - z_L        : rx_all
+        #   - z_ℓ        : feat_partial
+        #   - z_1        : feat_chunk1 (첫 번째 chunk만 받은 경우)
+        #   - rmask(z_L) : feat_full_m
+        #   - rmask(z_ℓ) : feat_partial_m
+        feat_partial = torch.zeros_like(rx_all)
+        feat_partial[:, :, :ell_end] = rx_all[:, :, :ell_end]
+        # chunk 1개만 받은 경우 (첫 번째 chunk)
+        chunk1_end = self.chunk_ranges[0][1]
+        feat_chunk1 = torch.zeros_like(rx_all)
+        feat_chunk1[:, :, :chunk1_end] = rx_all[:, :, :chunk1_end]
+        feat_full_m = apply_mask(rx_all, num_active_chunks=L)
+        feat_partial_m = apply_mask(feat_partial, num_active_chunks=ell)
+
+        def get_recon(key, feat):
+            """Decoder를 필요한 경우에만 한 번 호출하고, (mse, recon)을 캐시에서 재사용"""
+            if key not in recon_cache:
+                recon = self.decoder(feat)
+                mse = criterion(recon, input_image)
+                recon_cache[key] = (mse, recon)
+            return recon_cache[key]
+
+        # 결과 리스트
+        mse_list = []
+        recon_list = []
+
+        # ----------------------
+        # a) Full
+        #   Objective: min d_s(z_L)
+        # ----------------------
+        if mode == 'full':
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_list.append(mse_full)
+            recon_list.append(recon_full)
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # b) Full_m
+        #   Objective: min d_s(rmask(z_L))
+        # ----------------------
+        if mode == 'full_m':
+            mse_full_m, recon_full_m = get_recon('full_m', feat_full_m)
+            mse_list.append(mse_full_m)
+            recon_list.append(recon_full_m)
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # c) Full_dual
+        #   Objective: min d_s(z_L) + d_s(rmask(z_L))
+        # ----------------------
+        if mode == 'full_dual':
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_full_m, recon_full_m = get_recon('full_m', feat_full_m)
+            mse_list.extend([mse_full, mse_full_m])
+            recon_list.extend([recon_full, recon_full_m])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # d) Full_part
+        #   Objective: min d_s(z_L) + d_s(z_ℓ)
+        # ----------------------
+        if mode == 'full_part':
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_partial, recon_partial = get_recon('partial', feat_partial)
+            mse_list.extend([mse_full, mse_partial])
+            recon_list.extend([recon_full, recon_partial])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # e) Full_part_m
+        #   Objective: min d_s(z_L) + d_s(rmask(z_ℓ))
+        # ----------------------
+        if mode == 'full_part_m':
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_partial_m, recon_partial_m = get_recon('partial_m', feat_partial_m)
+            mse_list.extend([mse_full, mse_partial_m])
+            recon_list.extend([recon_full, recon_partial_m])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # f) Mask_only
+        #   Objective: min d_s(rmask(z_L)) + d_s(rmask(z_ℓ))
+        # ----------------------
+        if mode == 'mask_only':
+            mse_full_m, recon_full_m = get_recon('full_m', feat_full_m)
+            mse_partial_m, recon_partial_m = get_recon('partial_m', feat_partial_m)
+            mse_list.extend([mse_full_m, mse_partial_m])
+            recon_list.extend([recon_full_m, recon_partial_m])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # g) hybrid_all
+        #   Objective: min d_s(z_L) + d_s(rmask(z_L)) + d_s(rmask(z_ℓ))
+        # ----------------------
+        if mode == 'hybrid_all':
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_full_m, recon_full_m = get_recon('full_m', feat_full_m)
+            mse_partial_m, recon_partial_m = get_recon('partial_m', feat_partial_m)
+            mse_list.extend([mse_full, mse_full_m, mse_partial_m])
+            recon_list.extend([recon_full, recon_full_m, recon_partial_m])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        # ----------------------
+        # h) chunk1_full
+        #   Objective: min d_s(z_1) + d_s(z_L)
+        # ----------------------
+        if mode == 'chunk1_full':
+            mse_chunk1, recon_chunk1 = get_recon('chunk1', feat_chunk1)
+            mse_full, recon_full = get_recon('full', rx_all)
+            mse_list.extend([mse_chunk1, mse_full])
+            recon_list.extend([recon_chunk1, recon_full])
+            return {'mse': mse_list, 'recon_img': recon_list}
+
+        raise ValueError(
+            f"Unsupported progressive_mode: {self.args.progressive_mode} (canonical: {mode}). "
+            f"Supported modes: 'full', 'full_m', 'full_dual', 'full_part', 'full_part_m', 'mask_only', 'hybrid_all', 'chunk1_full' "
+            f"(plus legacy aliases 'off', 'rand_mask_2')."
+        )

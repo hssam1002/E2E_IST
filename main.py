@@ -25,6 +25,12 @@ def main():
     seed_torch(config.seed)
     logger = logger_configuration(config, save_log=True)
     logger.info("Initializing E2E-IST...")
+    logger.info(
+        f"Progressive mode: {args.progressive_mode} | "
+        f"Packet size: {args.packet_size} | "
+        f"Mask prob: {getattr(config, 'mask_prob', 0.1):.3f} | "
+        f"Transmitted dim: {config.transmitted_dim}"
+    )
     
     # Setup model
     net = setup_model(args, config, logger)

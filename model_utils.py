@@ -145,8 +145,8 @@ def setup_optimizer_and_scheduler(net, config, args):
         scheduler = ReduceLROnPlateau(
             optimizer,
             mode='max',  # PSNR is higher is better
-            patience=10,
-            factor=0.5,
+            patience = 5,
+            factor = 0.5,
             min_lr=config.learning_rate * 0.01,
             verbose=True
         )
